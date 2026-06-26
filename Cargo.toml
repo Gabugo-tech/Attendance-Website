@@ -1,0 +1,22 @@
+[package]
+name = "coou-biometric-server"
+version = "1.0.0"
+edition = "2021"
+authors = ["COOU Engineering Team <thatwon95@gmail.com>"]
+description = "A high-performance, asynchronous Rust biometric attendance backend for Chukwuemeka Odumegwu Ojukwu University"
+
+[[bin]]
+name = "coou_biometric_server"
+path = "rust-src/main.rs"
+
+[dependencies]
+tokio = { version = "1.38", features = ["full"] }
+axum = { version = "0.7.5" }
+tower-http = { version = "0.5.2", features = ["fs", "cors", "trace"] }
+serde = { version = "1.0.203", features = ["derive"] }
+serde_json = "1.0.117"
+reqwest = { version = "0.12.4", features = ["json", "multipart"] }
+dotenvy = "0.15.7"
+base64 = "0.22.1"
+rand = "0.8.5"
+futures-util = "0.3.30"
