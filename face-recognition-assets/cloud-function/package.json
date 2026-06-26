@@ -1,0 +1,15 @@
+{
+  "name": "coou-face-functions",
+  "description": "Firebase Cloud Functions for biometric face-recognition match validation",
+  "version": "1.0.0",
+  "main": "index.js",
+  "engines": {
+    "node": "18"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "firebase-admin": "^11.11.1",
+    "firebase-functions": "^4.5.0"
+  },
+  "private": true
+}

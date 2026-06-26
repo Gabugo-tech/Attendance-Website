@@ -1,0 +1,114 @@
+{
+  "entities": {
+    "Student": {
+      "title": "Student",
+      "description": "Student biometric roster profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique student identifier" },
+        "name": { "type": "string", "description": "Student's full name (Surname first)" },
+        "regNo": { "type": "string", "description": "Chukwuemeka Odumegwu Ojukwu University Registration Number" },
+        "department": { "type": "string", "description": "Student's department" },
+        "photoUrl": { "type": "string", "description": "Base64 encoded photo or image URL" },
+        "registeredBiometrics": {
+          "type": "object",
+          "properties": {
+            "face": { "type": "boolean" },
+            "fingerprint": { "type": "boolean" },
+            "devicePasskey": { "type": "boolean" }
+          }
+        },
+        "faceFingerprintHash": { "type": "string" },
+        "faceEncodings": {
+          "type": "array",
+          "description": "Array containing 128-dimensional face encoding vectors",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          }
+        }
+      },
+      "required": ["id", "name", "regNo", "department", "photoUrl"]
+    },
+    "Course": {
+      "title": "Course",
+      "description": "COOU Academic Course",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "title": { "type": "string" },
+        "department": { "type": "string" },
+        "lecturerName": { "type": "string" }
+      },
+      "required": ["code", "title", "department", "lecturerName"]
+    },
+    "AttendanceSession": {
+      "title": "AttendanceSession",
+      "description": "Active session started by lecturer",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "courseCode": { "type": "string" },
+        "date": { "type": "string" },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "secureToken": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "isCustomLocationLocked": { "type": "boolean" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "radiusMeters": { "type": "number" }
+      },
+      "required": ["id", "courseCode", "date", "startTime", "secureToken", "isActive", "latitude", "longitude", "radiusMeters"]
+    },
+    "AttendanceRecord": {
+      "title": "AttendanceRecord",
+      "description": "Marked attendance record of a student",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "courseCode": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "regNo": { "type": "string" },
+        "department": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "biometricType": { "type": "string", "enum": ["facial_recognition", "fingerprint_scan", "device_passkey"] },
+        "status": { "type": "string", "enum": ["present", "late"] },
+        "locationInfo": {
+          "type": "object",
+          "properties": {
+            "campusName": { "type": "string" },
+            "distanceMeters": { "type": "number" },
+            "latitude": { "type": "number" },
+            "longitude": { "type": "number" },
+            "isWithinBounds": { "type": "boolean" }
+          }
+        },
+        "authSnapshot": { "type": "string" }
+      },
+      "required": ["id", "sessionId", "courseCode", "studentId", "studentName", "regNo", "department", "timestamp", "biometricType", "status"]
+    }
+  },
+  "firestore": {
+    "/students/{studentId}": {
+      "schema": "Student",
+      "description": "Students collection"
+    },
+    "/courses/{courseCode}": {
+      "schema": "Course",
+      "description": "Academic courses"
+    },
+    "/sessions/{sessionId}": {
+      "schema": "AttendanceSession",
+      "description": "Lecture attendance sessions"
+    },
+    "/records/{recordId}": {
+      "schema": "AttendanceRecord",
+      "description": "Student attendance checks"
+    }
+  }
+}

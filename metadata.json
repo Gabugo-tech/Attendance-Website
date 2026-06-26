@@ -1,0 +1,11 @@
+{
+  "name": "COOU Smart Attendance System",
+  "description": "Biometrics-secured attendance tracking system for Chukwuemeka Odumegwu Ojukwu University with real-time reporting, camera facial detection, and fingerprint simulation.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
