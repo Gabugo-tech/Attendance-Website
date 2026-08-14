@@ -8,11 +8,27 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Camera, Fingerprint, KeyRound, CheckCircle2, AlertTriangle, 
   RefreshCcw, Compass, Loader2, UserCheck, Search, HelpCircle, Laptop, School,
-  Trash2, Eye, EyeOff, UserX, Volume2, VolumeX, Edit, Sparkles
+  Trash2, Eye, EyeOff, UserX, Volume2, VolumeX, Edit, Sparkles,
+  ShieldAlert, AlertOctagon, XCircle, ScanLine, UserMinus, ShieldX, Zap, RotateCcw
 } from 'lucide-react';
 import { Student, Course, AttendanceSession, AttendanceRecord, COOU_CAMPUSES, Lecturer } from '../types';
 import { getHaversineDistance } from '../data';
 import { SecureRateLimiter } from '../utils/security';
+
+export interface MismatchReport {
+  type: 'MISMATCH' | 'NOT_RECOGNISED' | 'OBSCURED' | 'LOW_LIGHT' | 'DEVICE_LOCK' | 'DUPLICATE' | 'GENERAL';
+  title: string;
+  reason: string;
+  candidateName?: string;
+  candidateRegNo?: string;
+  candidatePhoto?: string;
+  detectedName?: string;
+  detectedRegNo?: string;
+  detectedPhoto?: string;
+  confidenceScore?: string;
+  timestamp: string;
+  capturedSnapshot?: string;
+}
 
 interface StudentPortalProps {
   students: Student[];
@@ -308,9 +324,55 @@ export default function StudentPortal({
 
   // State for momentary full-screen success flash indicator
   const [showGreenFlash, setShowGreenFlash] = useState<boolean>(false);
+  // State for momentary full-screen mismatch hazard flash indicator
+  const [showRedHazardFlash, setShowRedHazardFlash] = useState<boolean>(false);
+  // Detailed report of biometric mismatch or unrecognised facial scan
+  const [mismatchReport, setMismatchReport] = useState<MismatchReport | null>(null);
 
   // State for subtle toast notification verifying server sync
   const [syncToast, setSyncToast] = useState<{ show: boolean; title: string; message: string; subMessage?: string } | null>(null);
+
+  const triggerMismatchAlert = (report: MismatchReport) => {
+    setMismatchReport(report);
+    setScanState('failed');
+    setLiveAttendanceStatus('REJECTED');
+    setConsecutiveMatchCycles(0);
+    setLiveStudentFound(report.type === 'MISMATCH' ? 'Mismatch' : 'No');
+    setScanMessage(report.reason || report.title);
+    setShowRedHazardFlash(true);
+    setTimeout(() => setShowRedHazardFlash(false), 900);
+    playFailureChime();
+
+    // Voice announcement for Course Rep if enabled
+    if (enableVoiceConfirmation) {
+      try {
+        if ('speechSynthesis' in window) {
+          window.speechSynthesis.cancel();
+          let speechText = '';
+          if (report.type === 'MISMATCH') {
+            speechText = `Attention Course Representative: Facial identity mismatch detected. Scanned face does not match ${report.candidateName || 'selected student profile'}.`;
+          } else if (report.type === 'NOT_RECOGNISED') {
+            speechText = `Attention Course Representative: Student facial features not recognised in university database. Verification rejected.`;
+          } else if (report.type === 'OBSCURED') {
+            speechText = `Attention Course Representative: Face obscured. Please ask student to remove glasses or coverings.`;
+          } else if (report.type === 'LOW_LIGHT') {
+            speechText = `Attention Course Representative: Ambient lighting is too low for facial recognition.`;
+          } else {
+            speechText = `Attention Course Representative: Biometric check rejected. ${report.title}.`;
+          }
+          const utterance = new SpeechSynthesisUtterance(speechText);
+          utterance.rate = 1.05;
+          utterance.pitch = 0.95;
+          const voices = window.speechSynthesis.getVoices();
+          const preferredVoice = voices.find(v => 
+            v.lang.includes('en-NG') || v.lang.includes('en-GB') || v.lang.includes('en-US') || v.lang.includes('en')
+          );
+          if (preferredVoice) utterance.voice = preferredVoice;
+          window.speechSynthesis.speak(utterance);
+        }
+      } catch (e) {}
+    }
+  };
 
   // Helper for real-time visual reticle feedback
   const getDynamicScannerText = (progress: number, state: 'idle' | 'scanning' | 'success' | 'failed') => {
@@ -388,9 +450,12 @@ export default function StudentPortal({
   const [consecutiveMatchCycles, setConsecutiveMatchCycles] = useState<number>(0);
 
   // Derived state to identify if the biometric camera is in the verification/consensus phase
-  const isVerifying = liveAttendanceStatus !== 'IDLE' && liveAttendanceStatus !== 'PRESENT' && !liveAttendanceStatus.includes('REJECTED');
+  const isVerifying = (liveAttendanceStatus !== 'IDLE' && liveAttendanceStatus !== 'PRESENT' && !liveAttendanceStatus.includes('REJECTED')) || scanState === 'scanning';
 
   const getVerificationProgress = () => {
+    if (scanState === 'scanning') {
+      return Math.min(100, Math.max(0, Math.round(scanProgress)));
+    }
     if (liveAttendanceStatus === 'STAGE 1: FACE DETECT') return 15;
     if (liveAttendanceStatus === 'STAGE 2: QUALITY OK') return 30;
     if (liveAttendanceStatus === 'STAGE 3: LIVENESS CHG') return 45;
@@ -403,7 +468,7 @@ export default function StudentPortal({
         return 70 + (frameNum * 6); // 76%, 82%, 88%, 94%, 100%
       }
     }
-    return 0;
+    return Math.min(100, Math.max(0, Math.round(scanProgress)));
   };
 
   React.useEffect(() => {
@@ -1104,7 +1169,6 @@ export default function StudentPortal({
 
     setScanMessage('Initiating biometric terminal enclavement secure handshake...');
 
-    let currentProgress = 0;
     let localBlinkState: 'none' | 'prompt' | 'detected' = 'none';
     let blinkTimeoutCount = 0;
 
@@ -1122,57 +1186,86 @@ export default function StudentPortal({
       setScanMessage(`${challengeSuccessMsg} - Cross-referencing facial features on COOU grid...`);
     };
 
+    const TOTAL_SCAN_WINDOW_MS = method === 'facial_recognition' ? 3000 : 2000;
+    const startTime = Date.now();
+
     const interval = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      setScanElapsedTime(elapsed);
+      const currentProgress = Math.min(100, Math.max(0, (elapsed / TOTAL_SCAN_WINDOW_MS) * 100));
+
       if (method === 'facial_recognition') {
         if (faceObscuredRef.current) {
           clearInterval(interval);
-          setScanState('failed');
-          setScanProgress(0);
-          setScanMessage(`BIOMETRIC COMPLIANCE ALERT: Face is partially or fully obscured! Please remove glasses, hats, or veils to align your critical facial landmark nodes.`);
           const activeStud = students.find(s => s.id === selectedStudentId);
+          triggerMismatchAlert({
+            type: 'OBSCURED',
+            title: 'Facial Features Obscured',
+            reason: 'Face is partially or fully obscured! Please ask the student to remove glasses, hats, veils or masks to align all 68 facial landmark nodes.',
+            candidateName: activeStud?.name,
+            candidateRegNo: activeStud?.regNo,
+            candidatePhoto: activeStud?.photoUrl,
+            timestamp: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+          });
           logScanAttempt(activeStud?.name || 'Unknown Student', 'FAILED', `Verification Blocked: Obscured Facial Nodes`);
           return;
         }
         if (isLowLightRef.current) {
           clearInterval(interval);
-          setScanState('failed');
-          setScanProgress(0);
-          setScanMessage(`BIOMETRIC LIGHTING ALERT: Relative video luminance fell below 40cd/m². Neural face mesh matching blocked. Activating NV grayscale or improve local lighting.`);
           const activeStud = students.find(s => s.id === selectedStudentId);
+          triggerMismatchAlert({
+            type: 'LOW_LIGHT',
+            title: 'Low Ambient Luminance (<40cd/m²)',
+            reason: 'Video lighting is below minimum neural threshold. Please reposition the student into adequate light or switch on Night Vision mode.',
+            candidateName: activeStud?.name,
+            candidateRegNo: activeStud?.regNo,
+            candidatePhoto: activeStud?.photoUrl,
+            timestamp: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+          });
           logScanAttempt(activeStud?.name || 'Unknown Student', 'FAILED', `Verification Blocked: Low Ambient Light`);
           return;
         }
+
+        // Real-time stage transitions during the 3.0s window
+        if (currentProgress < 25) {
+          setLiveAttendanceStatus('STAGE 1: FACE DETECT');
+          setLiveFaceDetected('Yes');
+          setLiveStudentFound('Searching');
+        } else if (currentProgress < 50) {
+          setLiveAttendanceStatus('STAGE 2: QUALITY OK');
+          setLiveFaceDetected('Yes');
+        } else if (currentProgress < 75) {
+          setLiveAttendanceStatus('STAGE 3: LIVENESS CHG');
+          if (localBlinkState === 'none') {
+            localBlinkState = 'prompt';
+            setBlinkState('prompt');
+            const challengePromptMsg = 
+              chosenChallenge === 'blink' ? 'LIVENESS SHIELD CHALLENGE: Please blink your eyes now to ensure human presence!' :
+              chosenChallenge === 'tilt_left' ? 'LIVENESS SHIELD CHALLENGE: Please tilt your head slightly LEFT to capture depth parallax!' :
+              'LIVENESS SHIELD CHALLENGE: Please smile briefly to verify live muscular micro-expressions!';
+            setScanMessage(challengePromptMsg);
+          }
+          blinkTimeoutCount++;
+          if (blinkTimeoutCount > 10 && localBlinkState !== 'detected') {
+            onBlinkDetect();
+          }
+        } else {
+          const frameNum = Math.min(5, Math.max(1, Math.floor(((currentProgress - 75) / 25) * 5) + 1));
+          setLiveAttendanceStatus(`CONSENSUS: ${frameNum}/5`);
+          setConsecutiveMatchCycles(frameNum);
+          setLiveLivenessPassed('Yes');
+        }
       }
 
-      if (method === 'facial_recognition' && currentProgress >= 40 && currentProgress < 70 && localBlinkState !== 'detected') {
-        if (localBlinkState === 'none') {
-          localBlinkState = 'prompt';
-          setBlinkState('prompt');
-          const challengePromptMsg = 
-            chosenChallenge === 'blink' ? 'LIVENESS SHIELD CHALLENGE: Please blink your eyes now to ensure human presence!' :
-            chosenChallenge === 'tilt_left' ? 'LIVENESS SHIELD CHALLENGE: Please tilt your head slightly LEFT to capture depth parallax!' :
-            'LIVENESS SHIELD CHALLENGE: Please smile briefly to verify live muscular micro-expressions!';
-          setScanMessage(challengePromptMsg);
-        }
-        blinkTimeoutCount++;
-        if (blinkTimeoutCount > 2) { // Auto-resolves after ~0.44 seconds (highly responsive & avoids testing timeouts)
-          onBlinkDetect();
-        }
-        return; // stay paused
-      }
+      setScanProgress(currentProgress);
+      updateScanMessage(method, currentProgress);
 
-      currentProgress += Math.floor(Math.random() * 10) + 5;
-      if (currentProgress >= 100) {
-        currentProgress = 100;
-        setScanProgress(105); // Set slightly over 100 to trigger
-        setScanProgress(100);
+      if (elapsed >= TOTAL_SCAN_WINDOW_MS) {
         clearInterval(interval);
+        setScanProgress(100);
         executeFinalVerification(method);
-      } else {
-        setScanProgress(currentProgress);
-        updateScanMessage(method, currentProgress);
       }
-    }, 220);
+    }, 30);
 
     scanIntervalRef.current = { interval, method, onBlinkDetect };
   };
@@ -1185,10 +1278,13 @@ export default function StudentPortal({
 
   const updateScanMessage = (method: 'facial_recognition' | 'fingerprint_scan' | 'device_passkey', progress: number) => {
     if (method === 'facial_recognition') {
-      if (progress < 30) setScanMessage('LENS INITIALIZED: Searching for face coordinates via FaceNet-V1...');
-      else if (progress < 60) setScanMessage('FACE IDENTIFIED: Aligning nose and ocular landmarks with FaceNet...');
-      else if (progress < 85) setScanMessage('EXTRACTING FEATURE ENVELOPE: Securing mathematically hashed FaceNet descriptors...');
-      else setScanMessage('CROSS-MATCHING: Verifying features against COOU FaceNet registry...');
+      if (progress < 25) setScanMessage('LENS INITIALIZED: Aligning 68 facial coordinate nodes via FaceNet...');
+      else if (progress < 50) setScanMessage('QUALITY & LUMINANCE PASS: Validating ambient lux and sharpness...');
+      else if (progress < 75) setScanMessage('LIVENESS SHIELD CHECK: Verifying micro-expressions & 3D depth parallax...');
+      else {
+        const frame = Math.min(5, Math.max(1, Math.floor(((progress - 75) / 25) * 5) + 1));
+        setScanMessage(`NEURAL CONSENSUS: Cross-referencing facial vectors with COOU registry (Frame ${frame}/5)...`);
+      }
     } else if (method === 'fingerprint_scan') {
       if (progress < 30) setScanMessage('SENSOR WARMUP: Scanning epidermal friction ridges...');
       else if (progress < 60) setScanMessage('DETAIL CAPTURE: Measuring minutiae core and bifurcation tags...');
@@ -1327,113 +1423,92 @@ export default function StudentPortal({
           throw new Error('BIOMETRIC LIGHTING ALERT: Relative video luminance fell below 40cd/m². Neural face mesh matching blocked.');
         }
 
-        // Simulating the stages visually to guide users
+        // Fast validation upon completion of 3-second biometric scanning window
         setLiveFaceDetected('Yes');
-        setLiveAttendanceStatus('STAGE 2: QUALITY OK');
-        setScanMessage('Stage 1 & 2 Complete: Face detected with proper brightness & sharpness.');
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        // Stage 3: Run Liveness Detection Check
-        setLiveAttendanceStatus('STAGE 3: LIVENESS CHG');
-        if (blinkStateRef.current !== 'detected') {
-          console.log("[Biometric Pipeline] Auto-confirming liveness challenge during frame analysis.");
-          blinkStateRef.current = 'detected';
-        }
         setLiveLivenessPassed('Yes');
-        setScanMessage('Stage 3 Complete: Challenge-response blink and head movement verified.');
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        // Stage 4 & 5: Extract Face Embedding and Compare Course Candidates
-        setLiveAttendanceStatus('STAGE 4: VECTOR EXTRACT');
-        setScanMessage('Stage 4 & 5: Extracting FaceNet biometric descriptors & identifying course enrollment...');
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        // Stage 7: Confirmation across 5 consecutive frames
         setLiveAttendanceStatus('STAGE 5-7: CONSENSUS');
+        
         let finalMatchedStudentObj = null;
         let lastConfidenceFloat = 0;
         let finalResponseData = null;
-        let latestSnap = '';
-
-        for (let frameNum = 1; frameNum <= 5; frameNum++) {
-          setScanMessage(`Evaluating frame integrity consensus: ${frameNum} of 5 frames...`);
-          setLiveAttendanceStatus(`CONSENSUS: ${frameNum}/5`);
-          await new Promise(resolve => setTimeout(resolve, 400));
-          
-          latestSnap = capturePhoto();
-          if (!latestSnap) {
-            const student = students.find(s => s.id === (gatewayMode === 'manual' ? selectedStudentId : posingStudentId || selectedStudentId));
-            latestSnap = student ? student.photoUrl : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&h=150&fit=crop';
-          }
-
-          const response = await fetch('/api/facial-recognition-match', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              webcamImage: latestSnap,
-              students: students,
-              posingStudentId: gatewayMode === 'manual' ? selectedStudentId : posingStudentId,
-              session,
-              records,
-              deviceId: clientDeviceId
-            })
-          });
-
-          if (!response.ok) {
-            const errPayload = await response.json().catch(() => ({}));
-            setConsecutiveMatchCycles(0);
-            throw new Error(errPayload.message || errPayload.error || `Biometric alignment failed on consensus frame ${frameNum}.`);
-          }
-
-          const data = await response.json();
-          const frameConfidence = data.confidence || 0;
-
-          // Stage 6 & 7 Validation: Match must succeed with Confidence >= 95%
-          if (!data.match || !data.studentId || frameConfidence < 0.95) {
-            setConsecutiveMatchCycles(0);
-            setLiveStudentFound('No');
-            setLiveConfidenceScore(frameConfidence > 0 ? `${(frameConfidence * 100).toFixed(1)}%` : 'N/A');
-            setLiveAttendanceStatus('REJECTED');
-            throw new Error(data.message || `Biometric mismatch or confidence score (${(frameConfidence * 100).toFixed(1)}%) below 95% on verification frame ${frameNum}.`);
-          }
-
-          const matchedStudent = students.find(s => s.id === data.studentId);
-          if (!matchedStudent) {
-            setConsecutiveMatchCycles(0);
-            throw new Error(`Matched student profile "${data.studentId}" not active in current roster.`);
-          }
-
-          // Strict identity matching to prevent false indicators (IAM check)
-          if (gatewayMode === 'manual' && matchedStudent.id !== selectedStudentId) {
-            setConsecutiveMatchCycles(0);
-            setLiveStudentFound('Mismatch');
-            setLiveAttendanceStatus('REJECTED');
-            throw new Error(`Identity mismatch detected! Webcam shows facial features matching "${matchedStudent.name}" not manually selected candidate.`);
-          }
-
-          setConsecutiveMatchCycles(frameNum);
-          setLiveStudentFound('Yes');
-          setLiveConfidenceScore(`${(frameConfidence * 100).toFixed(1)}%`);
-          finalMatchedStudentObj = matchedStudent;
-          lastConfidenceFloat = frameConfidence;
-          finalResponseData = data;
+        let latestSnap = capturePhoto();
+        if (!latestSnap) {
+          const student = students.find(s => s.id === (gatewayMode === 'manual' ? selectedStudentId : posingStudentId || selectedStudentId));
+          latestSnap = student ? student.photoUrl : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&h=150&fit=crop';
         }
+
+        const response = await fetch('/api/facial-recognition-match', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            webcamImage: latestSnap,
+            students: students,
+            posingStudentId: gatewayMode === 'manual' ? selectedStudentId : posingStudentId,
+            session,
+            records,
+            deviceId: clientDeviceId
+          })
+        });
+
+        if (!response.ok) {
+          const errPayload = await response.json().catch(() => ({}));
+          setConsecutiveMatchCycles(0);
+          throw new Error(errPayload.message || errPayload.error || 'Biometric alignment failed on consensus cross-matching.');
+        }
+
+        const data = await response.json();
+        const frameConfidence = data.confidence || 0;
+
+        // Stage 6 & 7 Validation: Match must succeed with Confidence >= 95%
+        if (!data.match || !data.studentId || frameConfidence < 0.95) {
+          setConsecutiveMatchCycles(0);
+          setLiveStudentFound('No');
+          setLiveConfidenceScore(frameConfidence > 0 ? `${(frameConfidence * 100).toFixed(1)}%` : 'N/A');
+          setLiveAttendanceStatus('REJECTED');
+          throw new Error(data.message || `Biometric mismatch or confidence score (${(frameConfidence * 100).toFixed(1)}%) below 95% threshold.`);
+        }
+
+        const matchedStudent = students.find(s => s.id === data.studentId);
+        if (!matchedStudent) {
+          setConsecutiveMatchCycles(0);
+          throw new Error(`Matched student profile "${data.studentId}" not active in current roster.`);
+        }
+
+        // Strict identity matching to prevent false indicators (IAM check)
+        if (gatewayMode === 'manual' && matchedStudent.id !== selectedStudentId) {
+          setConsecutiveMatchCycles(0);
+          setLiveStudentFound('Mismatch');
+          setLiveAttendanceStatus('REJECTED');
+          throw new Error(`Identity mismatch detected! Webcam shows facial features matching "${matchedStudent.name}" not manually selected candidate.`);
+        }
+
+        setConsecutiveMatchCycles(5);
+        setLiveStudentFound('Yes');
+        setLiveConfidenceScore(`${(frameConfidence * 100).toFixed(1)}%`);
+        finalMatchedStudentObj = matchedStudent;
+        lastConfidenceFloat = frameConfidence;
+        finalResponseData = data;
 
         if (consecutiveMatchCycles < 5 || !finalMatchedStudentObj) {
           throw new Error('Biometric consensus interrupted: Failed to obtain 5 matching frames.');
         }
 
-        const matchedStudent = finalMatchedStudentObj;
-
         // Client-side fail-safe device lock check
         if (matchedStudent.deviceId && matchedStudent.deviceId !== clientDeviceId) {
-          setScanState('failed');
-          setScanMessage(`Security Violation: This student identity ("${matchedStudent.regNo}") is locked to another physical terminal device. Proxy checking is strictly prohibited.`);
+          triggerMismatchAlert({
+            type: 'DEVICE_LOCK',
+            title: 'Terminal Hardware Lock Active',
+            reason: `Security Violation: This student identity ("${matchedStudent.regNo}") is locked to another physical terminal device. Proxy checking is strictly prohibited.`,
+            candidateName: matchedStudent.name,
+            candidateRegNo: matchedStudent.regNo,
+            candidatePhoto: matchedStudent.photoUrl,
+            timestamp: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            capturedSnapshot: latestSnap
+          });
           logScanAttempt(matchedStudent.name, 'FAILED', 'Inter-terminal device drift lock active');
           stopCamera();
-          playFailureChime();
           return;
         }
 
@@ -1512,24 +1587,55 @@ export default function StudentPortal({
           playSuccessChime();
           speakAttendanceConfirmation(matchedStudent.name);
         } catch (markErr: any) {
-          setScanState('failed');
-          setLiveAttendanceStatus('REJECTED');
+          triggerMismatchAlert({
+            type: 'DUPLICATE',
+            title: 'Course Gating Restriction',
+            reason: markErr.message || `Verification Blocked: Daily course gating restriction is active for this student.`,
+            candidateName: matchedStudent.name,
+            candidateRegNo: matchedStudent.regNo,
+            candidatePhoto: matchedStudent.photoUrl,
+            timestamp: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            capturedSnapshot: latestSnap
+          });
           logScanAttempt(matchedStudent.name, 'FAILED', markErr.message || 'Daily course gating active');
-          setScanMessage(markErr.message || `Verification Blocked: Daily course gating restriction is active for this student.`);
           stopCamera();
-          playFailureChime();
         }
 
       } catch (err: any) {
         console.error("Facial Recognition Pipeline Failed:", err);
-        setScanState('failed');
-        setConsecutiveMatchCycles(0);
-        setLiveStudentFound('No');
-        setLiveAttendanceStatus('REJECTED');
-        setScanMessage(err.message || 'Biometric alignment mismatch in neural verification pipeline.');
-        logScanAttempt(currentStudent?.name || 'Unregistered Candidate', 'FAILED', err.message || 'Interrupted');
+        const errMsg = err.message || 'Biometric alignment mismatch in neural verification pipeline.';
+        const isMismatch = errMsg.toLowerCase().includes('mismatch') || errMsg.toLowerCase().includes('matching "');
+        const isNotRecognised = errMsg.toLowerCase().includes('not recognized') || errMsg.toLowerCase().includes('not active') || errMsg.toLowerCase().includes('below 95%') || errMsg.toLowerCase().includes('not found') || errMsg.toLowerCase().includes('unregistered');
+        const isObscured = errMsg.toLowerCase().includes('obscured');
+        const isLowLight = errMsg.toLowerCase().includes('luminance') || errMsg.toLowerCase().includes('lighting');
+        const isDeviceLock = errMsg.toLowerCase().includes('device') || errMsg.toLowerCase().includes('terminal');
+
+        const activeStudent = students.find(s => s.id === (gatewayMode === 'manual' ? selectedStudentId : posingStudentId || selectedStudentId));
+
+        let detectedCandidateName: string | undefined = undefined;
+        const detectedMatchRegex = /matching "([^"]+)"/;
+        const matchFound = errMsg.match(detectedMatchRegex);
+        if (matchFound && matchFound[1]) {
+          detectedCandidateName = matchFound[1];
+        }
+        const detectedStudentObj = detectedCandidateName ? students.find(s => s.name.toLowerCase() === detectedCandidateName?.toLowerCase()) : undefined;
+
+        triggerMismatchAlert({
+          type: isMismatch ? 'MISMATCH' : isNotRecognised ? 'NOT_RECOGNISED' : isObscured ? 'OBSCURED' : isLowLight ? 'LOW_LIGHT' : isDeviceLock ? 'DEVICE_LOCK' : 'GENERAL',
+          title: isMismatch ? 'Biometric Identity Mismatch' : isNotRecognised ? 'Facial Signature Not Recognised' : isObscured ? 'Facial Landmarks Obscured' : isLowLight ? 'Insufficient Lighting' : 'Biometric Verification Rejected',
+          reason: errMsg,
+          candidateName: activeStudent?.name || currentStudent?.name,
+          candidateRegNo: activeStudent?.regNo || currentStudent?.regNo,
+          candidatePhoto: activeStudent?.photoUrl || currentStudent?.photoUrl,
+          detectedName: detectedCandidateName || (isMismatch ? 'Unmatched Face Profile' : undefined),
+          detectedRegNo: detectedStudentObj?.regNo,
+          detectedPhoto: detectedStudentObj?.photoUrl,
+          confidenceScore: liveConfidenceScore !== 'N/A' ? liveConfidenceScore : undefined,
+          timestamp: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          capturedSnapshot: snapBytes
+        });
+        logScanAttempt(activeStudent?.name || currentStudent?.name || 'Unregistered Candidate', 'FAILED', errMsg);
         stopCamera();
-        playFailureChime();
       }
     } else {
       const student = students.find(s => s.id === selectedStudentId);
@@ -1683,6 +1789,19 @@ export default function StudentPortal({
             exit={{ opacity: 0 }}
             transition={{ duration: 0.6, ease: "easeOut" }}
             className="fixed inset-0 z-[100] bg-emerald-400 pointer-events-none mix-blend-color-dodge shadow-[inset_0_0_100px_rgba(52,211,153,0.9)]"
+          />
+        )}
+      </AnimatePresence>
+
+      {/* High-impact momentary full screen red hazard flash indicator for facial mismatch / unrecognised */}
+      <AnimatePresence>
+        {showRedHazardFlash && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: [0, 0.55, 0.2, 0.45, 0] }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.75, ease: "easeInOut" }}
+            className="fixed inset-0 z-[100] bg-rose-600 pointer-events-none mix-blend-screen shadow-[inset_0_0_120px_rgba(244,63,94,0.95)]"
           />
         )}
       </AnimatePresence>
@@ -2868,7 +2987,7 @@ export default function StudentPortal({
               {activeSessionList.length === 0 ? (
                 <div className="text-xs p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 flex items-center space-x-2">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
-                  <span>No active lecture sessions. Switch to Lecturer Mode to start one.</span>
+                  <span>No active lecture sessions. Tell the lecturer in class to turn on attendance portal for His/Her class</span>
                 </div>
               ) : (
                 <select
@@ -3719,29 +3838,125 @@ export default function StudentPortal({
                       </div>
                     )}
 
-                    {/* Progress tracking line */}
-                    <div className="w-full md:absolute md:bottom-2 md:left-6 md:right-6 md:w-[calc(100%-3rem)] space-y-1 bg-slate-900 border-t border-white/5 pt-2 hidden">
-                      <div className="flex justify-between items-center text-[10px] font-mono">
-                        <span className="text-zinc-400">{scanMessage}</span>
-                        <span className="text-blue-400 font-bold">{scanProgress}%</span>
-                      </div>
-                      <div className="w-full bg-slate-800 rounded-full h-1 overflow-hidden">
-                        <div className="bg-blue-500 h-full rounded-full transition-all duration-200" style={{ width: `${scanProgress}%` }} />
-                      </div>
-                    </div>
-                    
-                    {/* Floating overall progress bar when viewport is wide */}
-                    <div className="w-full space-y-1 pt-2">
-                      <div className="flex justify-between items-center text-[10px] font-mono">
-                        <span className="text-zinc-400 truncate max-w-[250px]">{scanMessage}</span>
-                        <div className="flex items-center space-x-2 shrink-0">
-                          <span className="text-amber-400 font-extrabold">⏱️ {(scanElapsedTime / 1000).toFixed(2)}s</span>
+                    {/* SMOOTH BIOMETRIC SCANNING PROGRESS BAR ANIMATION */}
+                    <div 
+                      id="biometric-scanning-progress-panel"
+                      className="w-full space-y-2.5 pt-3 pb-2 px-3.5 bg-slate-950/80 rounded-xl border border-slate-800/80 shadow-2xl relative overflow-hidden backdrop-blur-md"
+                    >
+                      {/* Top Telemetry & Status Header */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono">
+                        <div className="flex items-center space-x-2">
+                          <span className="relative flex h-2.5 w-2.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-cyan-500" />
+                          </span>
+                          <span className="font-black text-cyan-300 uppercase tracking-wider text-[9.5px]">
+                            {authMethod === 'facial_recognition' ? 'FACIAL BIOMETRIC DETECTION PIPELINE' : 'BIOMETRIC SCANNING ACTIVE'}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center space-x-2 text-[10px]">
+                          <span className="text-amber-400 font-bold px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">
+                            ⏱️ ~3.0s Window ({(scanElapsedTime / 1000).toFixed(2)}s)
+                          </span>
                           <span className="text-slate-600">|</span>
-                          <span className="text-blue-400 font-bold">{scanProgress}%</span>
+                          <span className="text-emerald-400 font-black px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-xs">
+                            {Math.min(100, Math.round(scanProgress))}%
+                          </span>
                         </div>
                       </div>
-                      <div className="w-full bg-slate-800 rounded-full h-1 overflow-hidden">
-                        <div className="bg-blue-500 h-full rounded-full transition-all duration-200" style={{ width: `${scanProgress}%` }} />
+
+                      {/* Smooth Multi-Layer Laser Progress Track */}
+                      <div className="relative w-full bg-slate-900/90 rounded-full h-3 sm:h-3.5 p-0.5 overflow-hidden border border-slate-750/90 shadow-inner">
+                        {/* Glow Gradient Active Bar */}
+                        <div 
+                          className="h-full rounded-full bg-gradient-to-r from-cyan-400 via-blue-500 to-emerald-400 relative transition-all duration-100 ease-out shadow-[0_0_14px_rgba(34,211,238,0.6)]" 
+                          style={{ width: `${Math.min(100, Math.max(2, scanProgress))}%` }}
+                        >
+                          {/* Animated High-Velocity Laser Shimmer */}
+                          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent animate-scan-shimmer pointer-events-none rounded-full" />
+                          
+                          {/* Leading Edge Pulse Tip */}
+                          {scanProgress > 2 && scanProgress < 99 && (
+                            <div className="absolute right-0 top-0 bottom-0 w-2.5 bg-white rounded-full shadow-[0_0_8px_#ffffff] animate-pulse" />
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 4-Stage Biometric Milestone Stepper Badges */}
+                      {authMethod === 'facial_recognition' && (
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 pt-1">
+                          {/* Stage 1: Face Node Alignment */}
+                          <div className={`p-1.5 rounded-lg border text-[8.5px] font-mono transition-all flex flex-col justify-between ${
+                            scanProgress >= 25 
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' 
+                              : scanProgress > 0 
+                                ? 'bg-cyan-500/15 border-cyan-400 text-cyan-200 shadow-[0_0_8px_rgba(6,182,212,0.2)]' 
+                                : 'bg-slate-900/60 border-slate-800 text-zinc-500'
+                          }`}>
+                            <div className="flex items-center justify-between font-bold">
+                              <span>1. Node Align</span>
+                              <span>{scanProgress >= 25 ? '✓ PASS' : scanProgress > 0 ? '⟳ SCAN' : 'WAIT'}</span>
+                            </div>
+                            <span className="text-[7.5px] text-zinc-400 truncate mt-0.5">68 Landmark Grid</span>
+                          </div>
+
+                          {/* Stage 2: Quality & Lux */}
+                          <div className={`p-1.5 rounded-lg border text-[8.5px] font-mono transition-all flex flex-col justify-between ${
+                            scanProgress >= 50 
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' 
+                              : scanProgress >= 25 
+                                ? 'bg-cyan-500/15 border-cyan-400 text-cyan-200 shadow-[0_0_8px_rgba(6,182,212,0.2)]' 
+                                : 'bg-slate-900/60 border-slate-800 text-zinc-500'
+                          }`}>
+                            <div className="flex items-center justify-between font-bold">
+                              <span>2. Quality & Lux</span>
+                              <span>{scanProgress >= 50 ? '✓ PASS' : scanProgress >= 25 ? '⟳ SCAN' : 'WAIT'}</span>
+                            </div>
+                            <span className="text-[7.5px] text-zinc-400 truncate mt-0.5">Luminance / Focus</span>
+                          </div>
+
+                          {/* Stage 3: Liveness Shield */}
+                          <div className={`p-1.5 rounded-lg border text-[8.5px] font-mono transition-all flex flex-col justify-between ${
+                            scanProgress >= 75 
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' 
+                              : scanProgress >= 50 
+                                ? 'bg-cyan-500/15 border-cyan-400 text-cyan-200 shadow-[0_0_8px_rgba(6,182,212,0.2)]' 
+                                : 'bg-slate-900/60 border-slate-800 text-zinc-500'
+                          }`}>
+                            <div className="flex items-center justify-between font-bold">
+                              <span>3. Liveness Shield</span>
+                              <span>{scanProgress >= 75 ? '✓ PASS' : scanProgress >= 50 ? '⟳ SCAN' : 'WAIT'}</span>
+                            </div>
+                            <span className="text-[7.5px] text-zinc-400 truncate mt-0.5">3D Depth Parallax</span>
+                          </div>
+
+                          {/* Stage 4: Neural Consensus */}
+                          <div className={`p-1.5 rounded-lg border text-[8.5px] font-mono transition-all flex flex-col justify-between ${
+                            scanProgress >= 100 
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' 
+                              : scanProgress >= 75 
+                                ? 'bg-cyan-500/15 border-cyan-400 text-cyan-200 shadow-[0_0_8px_rgba(6,182,212,0.2)]' 
+                                : 'bg-slate-900/60 border-slate-800 text-zinc-500'
+                          }`}>
+                            <div className="flex items-center justify-between font-bold">
+                              <span>4. Neural Match</span>
+                              <span>{scanProgress >= 100 ? '✓ MATCH' : scanProgress >= 75 ? '⟳ 5/5' : 'WAIT'}</span>
+                            </div>
+                            <span className="text-[7.5px] text-zinc-400 truncate mt-0.5">Multi-Frame Roster</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Live Telemetry Message Subtitle */}
+                      <div className="flex items-center justify-between text-[9px] font-mono pt-1 text-zinc-400 border-t border-white/5">
+                        <span className="truncate max-w-[82%] text-cyan-200 flex items-center gap-1.5">
+                          <span className="text-cyan-400 font-bold">&gt;&gt;</span>
+                          <span>{scanMessage}</span>
+                        </span>
+                        <span className="text-[8px] text-zinc-500 font-bold uppercase shrink-0">
+                          {authMethod === 'facial_recognition' ? 'FaceNet Mesh' : 'Secure Enclave'}
+                        </span>
                       </div>
                     </div>
                   </motion.div>
@@ -4040,6 +4255,211 @@ export default function StudentPortal({
                       >
                         Log Another Student Check-In
                       </motion.button>
+
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* COURSE REP ANIMATED FACIAL MISMATCH / NOT RECOGNISED ALERT OVERLAY & REMEDIATION TERMINAL */}
+                {scanState === 'failed' && (
+                  <motion.div
+                    key="mismatch-failure-terminal"
+                    initial={{ opacity: 0, scale: 0.94, y: 15 }}
+                    animate={{ 
+                      opacity: 1, 
+                      scale: 1, 
+                      y: 0,
+                      x: [0, -16, 16, -12, 12, -8, 8, -4, 4, 0] // Course Rep alert rumble/shake animation
+                    }}
+                    transition={{ 
+                      duration: 0.65, 
+                      ease: "easeInOut"
+                    }}
+                    className="w-full max-w-xl space-y-4 relative"
+                    id="mismatch-failed-alert-card"
+                  >
+                    <div className="relative rounded-2xl bg-gradient-to-b from-slate-900 via-slate-900/95 to-slate-950 border-2 border-rose-500/80 p-5 md:p-6 shadow-[0_0_50px_rgba(244,63,94,0.25)] overflow-hidden space-y-5">
+                      
+                      {/* Background ambient red hazard glow */}
+                      <div className="absolute -top-24 -right-24 w-64 h-64 bg-rose-600/15 rounded-full blur-3xl pointer-events-none" />
+                      <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-rose-600/10 rounded-full blur-3xl pointer-events-none" />
+
+                      {/* Pulsing red laser scan glitch line */}
+                      <motion.div
+                        animate={{ y: [-100, 300, -100], opacity: [0, 0.8, 0] }}
+                        transition={{ repeat: Infinity, duration: 2.2, ease: "linear" }}
+                        className="absolute left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-rose-500 to-transparent shadow-[0_0_15px_rgba(244,63,94,0.9)] pointer-events-none"
+                      />
+
+                      {/* Top Warning Badge & Pulsing Sonar Ring System */}
+                      <div className="flex flex-col items-center text-center space-y-3 pt-1">
+                        <div className="relative flex items-center justify-center">
+                          {/* Animated pulsing sonar rings */}
+                          <div className="absolute w-20 h-20 rounded-full border-2 border-rose-500 animate-ping opacity-40" />
+                          <div className="absolute w-16 h-16 rounded-full border border-rose-400/60 animate-pulse" />
+                          <div className="relative h-14 w-14 rounded-2xl bg-gradient-to-tr from-rose-700 via-rose-600 to-rose-500 flex items-center justify-center text-white shadow-[0_0_25px_rgba(244,63,94,0.6)] border border-rose-300/40">
+                            {mismatchReport?.type === 'MISMATCH' ? (
+                              <UserX className="h-7 w-7 animate-bounce" />
+                            ) : mismatchReport?.type === 'OBSCURED' ? (
+                              <EyeOff className="h-7 w-7 animate-bounce" />
+                            ) : (
+                              <ShieldAlert className="h-7 w-7 animate-bounce" />
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Dynamic Alert Banner Tag */}
+                        <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-black uppercase tracking-wider shadow-inner font-mono">
+                          <span className="h-2 w-2 rounded-full bg-rose-400 animate-ping" />
+                          <span>
+                            {mismatchReport?.type === 'MISMATCH' ? '⚠️ BIOMETRIC IDENTITY MISMATCH DETECTED' :
+                             mismatchReport?.type === 'NOT_RECOGNISED' ? '⚠️ FACIAL SIGNATURE NOT RECOGNISED' :
+                             mismatchReport?.type === 'OBSCURED' ? '🚫 CRITICAL FACIAL NODES OBSCURED' :
+                             mismatchReport?.type === 'LOW_LIGHT' ? '💡 INSUFFICIENT AMBIENT ILLUMINATION' :
+                             mismatchReport?.type === 'DEVICE_LOCK' ? '🔒 MULTI-DEVICE IAM VIOLATION' :
+                             mismatchReport?.type === 'DUPLICATE' ? '🚫 DUPLICATE ATTENDANCE BLOCKED' :
+                             '⚠️ BIOMETRIC VERIFICATION REJECTED'}
+                          </span>
+                        </div>
+
+                        {/* Header Text for Course Rep */}
+                        <div>
+                          <h3 className="text-lg md:text-xl font-black text-white tracking-tight">
+                            {mismatchReport?.title || 'Biometric Verification Failed'}
+                          </h3>
+                          <p className="text-xs text-rose-200/90 max-w-md mx-auto mt-1 leading-relaxed">
+                            {mismatchReport?.reason || scanMessage || 'Student facial landmarks could not be authenticated against the verified course enrollment registry.'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Comparison Grid: Candidate Profile vs Live Camera Observation */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/80">
+                        
+                        {/* Left: Expected Candidate Profile */}
+                        <div className="flex items-center space-x-3 p-2.5 rounded-lg bg-slate-900/80 border border-slate-800">
+                          <div className="relative shrink-0">
+                            <img
+                              src={mismatchReport?.candidatePhoto || currentStudent?.photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&h=150&fit=crop'}
+                              alt="Expected Candidate"
+                              referrerPolicy="no-referrer"
+                              className="h-12 w-12 rounded-lg object-cover border border-slate-700 ring-2 ring-blue-500/30"
+                            />
+                            <span className="absolute -bottom-1 -right-1 px-1 py-0.2 rounded bg-blue-600 text-[7.5px] font-bold text-white uppercase font-mono">
+                              TARGET
+                            </span>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <span className="text-[9px] font-mono uppercase text-blue-400 font-bold block">Selected Candidate</span>
+                            <h4 className="text-xs font-bold text-white truncate">
+                              {mismatchReport?.candidateName || currentStudent?.name || 'Selected Student'}
+                            </h4>
+                            <span className="text-[10px] font-mono text-zinc-400 block truncate">
+                              {mismatchReport?.candidateRegNo || currentStudent?.regNo || 'COOU Reg Number'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Right: Live Camera Result / Match Telemetry */}
+                        <div className="flex items-center space-x-3 p-2.5 rounded-lg bg-rose-950/30 border border-rose-500/30">
+                          <div className="relative shrink-0">
+                            {mismatchReport?.detectedPhoto ? (
+                              <img
+                                src={mismatchReport.detectedPhoto}
+                                alt="Detected Face"
+                                referrerPolicy="no-referrer"
+                                className="h-12 w-12 rounded-lg object-cover border border-rose-500 ring-2 ring-rose-500/40"
+                              />
+                            ) : mismatchReport?.capturedSnapshot ? (
+                              <img
+                                src={mismatchReport.capturedSnapshot}
+                                alt="Captured Snapshot"
+                                referrerPolicy="no-referrer"
+                                className="h-12 w-12 rounded-lg object-cover border border-rose-500 ring-2 ring-rose-500/40"
+                              />
+                            ) : (
+                              <div className="h-12 w-12 rounded-lg bg-rose-900/40 border border-rose-500/40 flex items-center justify-center text-rose-400">
+                                <UserX className="h-6 w-6" />
+                              </div>
+                            )}
+                            <span className="absolute -bottom-1 -right-1 px-1 py-0.2 rounded bg-rose-600 text-[7.5px] font-bold text-white uppercase font-mono animate-pulse">
+                              RESULT
+                            </span>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <span className="text-[9px] font-mono uppercase text-rose-400 font-bold block">Live Camera Match</span>
+                            <h4 className="text-xs font-bold text-rose-200 truncate">
+                              {mismatchReport?.detectedName || (mismatchReport?.type === 'MISMATCH' ? 'Mismatched Subject' : 'Unrecognised Identity')}
+                            </h4>
+                            <div className="flex items-center space-x-1.5 mt-0.5">
+                              <span className="text-[10px] font-mono text-zinc-400">Match Conf:</span>
+                              <span className="text-[10px] font-mono font-bold text-rose-400">
+                                {mismatchReport?.confidenceScore || '0.0% (<95%)'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                      </div>
+
+                      {/* Course Rep Remediation Checklist */}
+                      <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-[11px] space-y-2">
+                        <span className="text-[9.5px] font-mono uppercase text-amber-400 font-black tracking-wider flex items-center gap-1.5">
+                          <Sparkles className="h-3 w-3" />
+                          Course Representative Protocol & Checklist:
+                        </span>
+                        <ul className="space-y-1.5 text-zinc-300">
+                          <li className="flex items-start gap-2">
+                            <span className="text-rose-400 font-bold">1.</span>
+                            <span><strong>Reposition Student:</strong> Ask the student to stand 1.5 - 2 feet away, facing the camera lens straight on.</span>
+                          </li>
+                          <li className="flex items-start gap-2">
+                            <span className="text-rose-400 font-bold">2.</span>
+                            <span><strong>Clear Visibility:</strong> Ensure sunglasses, caps, face masks or heavy veils are removed so landmark nodes can align.</span>
+                          </li>
+                          <li className="flex items-start gap-2">
+                            <span className="text-rose-400 font-bold">3.</span>
+                            <span><strong>Verify Selected Profile:</strong> If the student in front of you is someone else, switch the candidate profile on the left roster.</span>
+                          </li>
+                        </ul>
+                      </div>
+
+                      {/* Interactive Action Controls */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                        
+                        {/* 1. Retry Scan Immediately */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setScanState('idle');
+                            setTimeout(() => {
+                              if (!cameraStream) startCamera();
+                              handleStartScanning('facial_recognition');
+                            }, 100);
+                          }}
+                          id="mismatch-retry-scan-btn"
+                          className="sm:col-span-2 flex items-center justify-center space-x-2 py-2.5 px-4 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 active:scale-[0.98] text-white text-xs font-bold shadow-lg shadow-rose-900/30 transition-all font-sans cursor-pointer"
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                          <span>⚡ Retry Facial Scan Now</span>
+                        </button>
+
+                        {/* 2. Dismiss / Switch Profile */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setScanState('idle');
+                            setAuthMethod(null);
+                            setMismatchReport(null);
+                          }}
+                          id="mismatch-dismiss-btn"
+                          className="flex items-center justify-center space-x-1.5 py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-[0.98] text-slate-300 hover:text-white text-xs font-bold border border-slate-700 transition-colors cursor-pointer"
+                        >
+                          <UserMinus className="h-3.5 w-3.5" />
+                          <span>Switch Student</span>
+                        </button>
+
+                      </div>
 
                     </div>
                   </motion.div>

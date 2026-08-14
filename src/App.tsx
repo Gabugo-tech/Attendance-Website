@@ -23,6 +23,7 @@ import {
   saveStudentToDb, 
   getCoursesFromDb, 
   saveCourseToDb, 
+  deleteCourseFromDb,
   getSessionsFromDb, 
   saveSessionToDb, 
   getRecordsFromDb, 
@@ -429,6 +430,37 @@ export default function App() {
     }
   };
 
+  // Course registration and semester offering controllers
+  const handleRegisterCourse = async (newCourse: Course) => {
+    const updated = [...courses.filter(c => c.code !== newCourse.code), newCourse];
+    setCourses(updated);
+    try {
+      await saveCourseToDb(newCourse);
+    } catch (e) {
+      console.error("Failed to save course to database", e);
+    }
+  };
+
+  const handleUpdateCourse = async (updatedCourse: Course) => {
+    const updated = courses.map(c => c.code === updatedCourse.code ? updatedCourse : c);
+    setCourses(updated);
+    try {
+      await saveCourseToDb(updatedCourse);
+    } catch (e) {
+      console.error("Failed to update course in database", e);
+    }
+  };
+
+  const handleDeleteCourse = async (courseCode: string) => {
+    const updated = courses.filter(c => c.code !== courseCode);
+    setCourses(updated);
+    try {
+      await deleteCourseFromDb(courseCode);
+    } catch (e) {
+      console.error("Failed to delete course from database", e);
+    }
+  };
+
   // Course Rep enrollment controllers
   const handleRegisterCourseRep = (newRep: CourseRep) => {
     const updated = [...courseReps, newRep];
@@ -584,6 +616,9 @@ export default function App() {
               >
                 <AdminDashboard
                   courses={courses}
+                  onRegisterCourse={handleRegisterCourse}
+                  onUpdateCourse={handleUpdateCourse}
+                  onDeleteCourse={handleDeleteCourse}
                   lecturers={lecturers}
                   onRegisterLecturer={handleRegisterLecturer}
                   onDeleteLecturer={handleDeleteLecturer}

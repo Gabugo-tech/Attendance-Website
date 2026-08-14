@@ -380,7 +380,7 @@ export default function LecturerDashboard({
                   <option value="">-- Choose Course --</option>
                   {courses.map((course) => (
                     <option key={course.code} value={course.code}>
-                      {course.code} - {course.title}
+                      {course.code} - {course.title} {course.semester ? `(${course.semester === 'First Semester' ? '1st Sem' : '2nd Sem'})` : ''}
                     </option>
                   ))}
                 </select>

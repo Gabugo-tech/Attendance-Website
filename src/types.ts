@@ -33,6 +33,13 @@ export interface Course {
   title: string;
   department: string;
   lecturerName: string;
+  semester?: 'First Semester' | 'Second Semester' | string;
+  level?: '100 Level' | '200 Level' | '300 Level' | '400 Level' | '500 Level' | 'Postgraduate' | string;
+  creditUnits?: number;
+  academicSession?: string;
+  status?: 'Compulsory' | 'Required' | 'Elective' | 'Inactive' | string;
+  description?: string;
+  dateAdded?: string;
 }
 
 export interface Lecturer {

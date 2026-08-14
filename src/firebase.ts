@@ -250,6 +250,23 @@ export async function saveCourseToDb(course: Course): Promise<void> {
   }
 }
 
+export async function deleteCourseFromDb(courseCode: string): Promise<void> {
+  const current = await getCoursesFromDb();
+  const updated = current.filter(c => c.code !== courseCode);
+  localStorage.setItem('coou_courses', JSON.stringify(updated));
+
+  if (isMockFirebase || !db || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+    return;
+  }
+  try {
+    const { deleteDoc } = await import('firebase/firestore');
+    await deleteDoc(doc(db, 'courses', courseCode));
+    console.log(`[Sync Engine] Successfully deleted course ${courseCode} from Cloud Firestore.`);
+  } catch (err) {
+    console.error('[Sync Engine] Failed to delete course from cloud', err);
+  }
+}
+
 export async function getSessionsFromDb(): Promise<AttendanceSession[]> {
   const raw = localStorage.getItem('coou_sessions');
   const localCache = raw ? JSON.parse(raw) : [];
