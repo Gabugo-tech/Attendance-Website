@@ -19,10 +19,13 @@ export interface Student {
   faceFingerprintHash?: string;
   deviceCredentialId?: string;
   faceEncodings?: number[][];
+  arcfaceEmbedding512?: number[];
+  anonymizedTokenId?: string;
   encryptedFaceData?: string;
   registrationTimestamp?: string;
   registrationStatus?: 'APPROVED' | 'PENDING' | 'REJECTED';
   deviceId?: string; // Hardware device lock to prevent proxy marking
+  gdprCompliant?: boolean;
 }
 
 export interface Course {
@@ -93,6 +96,9 @@ export interface AttendanceRecord {
   date?: string; // Saved Date (e.g. YYYY-MM-DD or DD Month YYYY)
   time?: string; // Saved Time (e.g. HH:MM)
   confidenceScore?: number; // Saved Verification confidence score
+  livenessScore?: number; // Active + Passive Liveness combined score
+  livenessPassed?: boolean;
+  matchAlgorithm?: string; // e.g. "ArcFace-512D Cosine"
   deviceId?: string; // Saved hardware device footprint
 }
 

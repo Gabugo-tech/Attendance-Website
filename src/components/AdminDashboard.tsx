@@ -454,7 +454,7 @@ export default function AdminDashboard({
                 <div className="p-3.5 bg-indigo-50/50 rounded-xl border border-indigo-100/60 font-sans text-[11px] text-indigo-850 space-y-1.5 flex flex-col">
                   <span className="font-extrabold uppercase tracking-widest text-[9px] text-indigo-900">Security Operations Desk:</span>
                   <span className="leading-relaxed font-semibold">
-                    Liveness and facial mismatch filters guard against spoofing and deep-fake injection during roll enrollment and check-in. Failures lock the student terminal from marking attendance.
+                    FaceNet liveness verification and deep-fake mismatch shields guard against spoofing and presentation attacks during enrollment and check-in. Failures lock the student terminal from marking attendance.
                   </span>
                 </div>
               </div>

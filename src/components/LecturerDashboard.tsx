@@ -18,6 +18,8 @@ interface LecturerDashboardProps {
   onStartSession: (session: AttendanceSession) => void;
   onStopSession: (sessionId: string) => void;
   records: AttendanceRecord[];
+  onMarkAttendance: (record: AttendanceRecord) => void;
+  onDeleteAttendance: (recordId: string) => void;
 }
 
 export default function LecturerDashboard({
@@ -26,7 +28,9 @@ export default function LecturerDashboard({
   activeSessions,
   onStartSession,
   onStopSession,
-  records
+  records,
+  onMarkAttendance,
+  onDeleteAttendance
 }: LecturerDashboardProps) {
   // Creating session states
   const [selectedCourseCode, setSelectedCourseCode] = useState<string>('');
@@ -124,6 +128,55 @@ export default function LecturerDashboard({
 
   const sessionRecords = records.filter(r => r.sessionId === displaySessionId);
 
+  const handleToggleAttendance = async (student: Student, currentStatus: 'PRESENT' | 'ABSENT', existingRecordId?: string) => {
+    const activeSession = activeSessions.find(s => s.id === displaySessionId) || activeSessions[0];
+    if (!activeSession) {
+      alert("No active session found. Please initialize an Attendance Gate first.");
+      return;
+    }
+
+    if (currentStatus === 'PRESENT') {
+      const rec = records.find(r => r.studentId === student.id && r.sessionId === activeSession.id);
+      if (rec && onDeleteAttendance) {
+        onDeleteAttendance(rec.id);
+      } else if (existingRecordId && onDeleteAttendance) {
+        onDeleteAttendance(existingRecordId);
+      }
+    } else {
+      const newRecord: AttendanceRecord = {
+        id: `rec-usr-${Date.now()}`,
+        sessionId: activeSession.id,
+        courseCode: activeSession.courseCode,
+        studentId: student.id,
+        studentName: student.name,
+        regNo: student.regNo,
+        department: student.department,
+        timestamp: new Date().toISOString(),
+        biometricType: 'facial_recognition',
+        status: 'present',
+        locationInfo: {
+          campusName: 'Uli Campus (Computer Science Dept)',
+          distanceMeters: 0,
+          latitude: activeSession.latitude,
+          longitude: activeSession.longitude,
+          isWithinBounds: true
+        },
+        authSnapshot: student.photoUrl,
+        lecturerId: '',
+        date: new Date().toISOString().split('T')[0],
+        time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }),
+        confidenceScore: 1.0
+      };
+      if (onMarkAttendance) {
+        try {
+          await onMarkAttendance(newRecord);
+        } catch (e: any) {
+          alert(e.message || "Failed to mark attendance.");
+        }
+      }
+    }
+  };
+
   // Group stats for bento visual graphs
   const deptStats = students.reduce((acc, student) => {
     const isPresent = sessionRecords.some(r => r.studentId === student.id);
@@ -151,7 +204,8 @@ export default function LecturerDashboard({
       distance: record?.locationInfo?.distanceMeters,
       isWithinBounds: record?.locationInfo?.isWithinBounds,
       confidenceScore: record?.confidenceScore,
-      deviceId: record?.deviceId
+      deviceId: record?.deviceId,
+      recordId: record?.id
     };
   }).filter((row) => {
     // Search query matches
@@ -631,9 +685,19 @@ export default function LecturerDashboard({
                     
                     <div className="mt-2 flex items-center justify-between text-[10px] font-mono border-t border-slate-100 pt-1.5">
                       <span className="text-slate-500">Missed: <strong className="font-bold text-rose-600">{missed}/{total} L</strong></span>
-                      <span className="text-rose-700 font-bold bg-rose-50 border border-rose-100 px-1 py-0.2 rounded">
-                        {absenteeismRate}% Absent
-                      </span>
+                      <div className="flex items-center space-x-1.5">
+                        <span className="text-rose-700 font-bold bg-rose-50 border border-rose-100 px-1.5 py-0.2 rounded shrink-0">
+                          {absenteeismRate}% Absent
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleAttendance(st, 'ABSENT')}
+                          title="Instantly mark as PRESENT"
+                          className="text-green-700 font-extrabold bg-green-50 border border-green-200 px-1.5 py-0.2 rounded cursor-pointer transition hover:bg-green-100 hover:scale-105 active:scale-95 text-[9px] uppercase tracking-wide shrink-0"
+                        >
+                          Mark Present
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -884,13 +948,23 @@ export default function LecturerDashboard({
 
                     {/* Status Chip present vs absent */}
                     <td className="py-3 px-4 text-center">
-                      <span className={`inline-block px-2.5 py-1 rounded text-[10px] font-extrabold ${
-                        row.status === 'PRESENT'
-                          ? 'bg-green-50 text-green-700 border border-green-200'
-                          : 'bg-slate-100 text-slate-500 border border-slate-200'
-                      }`}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const studentObj = students.find(s => s.id === row.id);
+                          if (studentObj) {
+                            handleToggleAttendance(studentObj, row.status as 'PRESENT' | 'ABSENT', row.recordId);
+                          }
+                        }}
+                        title={row.status === 'PRESENT' ? "Click to mark as ABSENT" : "Click to mark as PRESENT"}
+                        className={`inline-block px-2.5 py-1 rounded text-[10px] font-extrabold transition hover:scale-[1.03] active:scale-95 cursor-pointer border ${
+                          row.status === 'PRESENT'
+                            ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100 hover:text-green-800'
+                            : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200 hover:text-slate-700'
+                        }`}
+                      >
                         {row.status}
-                      </span>
+                      </button>
                     </td>
                   </tr>
                 ))

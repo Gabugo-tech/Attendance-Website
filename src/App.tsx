@@ -28,6 +28,7 @@ import {
   getRecordsFromDb, 
   saveRecordToDb,
   deleteStudentFromDb,
+  deleteRecordFromDb,
   isMockFirebase,
   subscribeToSyncStatus,
   SyncStatus
@@ -260,6 +261,44 @@ export default function App() {
     loadData();
   }, []);
 
+  // Real-time synchronization background polling (checks for new attendance records every 3 seconds)
+  useEffect(() => {
+    let active = true;
+    const pollRealtimeUpdates = async () => {
+      try {
+        const latestSessions = await getSessionsFromDb();
+        const latestRecords = await getRecordsFromDb();
+        
+        if (!active) return;
+
+        // Check for genuine modifications to minimize re-renders
+        setSessions(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(latestSessions)) {
+            console.log("[Sync Hook] Synced latest lecture sessions in real time.");
+            return latestSessions;
+          }
+          return prev;
+        });
+
+        setRecords(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(latestRecords)) {
+            console.log("[Sync Hook] Synced latest attendance logs in real time.");
+            return latestRecords;
+          }
+          return prev;
+        });
+      } catch (err) {
+        console.error("[Sync Hook] Error polling real-time updates:", err);
+      }
+    };
+
+    const interval = setInterval(pollRealtimeUpdates, 3000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
+
   // Student registration controller
   const handleRegisterStudent = async (newStudent: Student) => {
     const updated = [...students, newStudent];
@@ -322,6 +361,16 @@ export default function App() {
       await saveRecordToDb(newRecord);
     } catch (e) {
       console.error("Failed to mark attendance in database", e);
+    }
+  };
+
+  const handleDeleteAttendance = async (recordId: string) => {
+    const updated = records.filter(r => r.id !== recordId);
+    setRecords(updated);
+    try {
+      await deleteRecordFromDb(recordId);
+    } catch (e) {
+      console.error("Failed to delete attendance record", e);
     }
   };
 
@@ -521,6 +570,8 @@ export default function App() {
                   onStartSession={handleStartSession}
                   onStopSession={handleStopSession}
                   records={records}
+                  onMarkAttendance={handleMarkAttendance}
+                  onDeleteAttendance={handleDeleteAttendance}
                 />
               </motion.div>
             ) : currentRole === 'admin' && authUser?.role === 'admin' ? (

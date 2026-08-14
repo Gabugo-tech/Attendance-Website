@@ -166,7 +166,7 @@ async function startServer() {
             match: false,
             studentId: null,
             confidence: 0,
-            message: "Student is not identified or registered in the biometric archive."
+            message: "Student not recognized in system registry. Live image does not match registered candidate."
           });
         }
         
@@ -225,7 +225,7 @@ async function startServer() {
           match: false,
           studentId: null,
           confidence: 0,
-          message: "Student is not identified or registered in the biometric archive."
+          message: "Student not recognized in system registry. Live image does not match registered candidate."
         });
       }
 
@@ -289,7 +289,7 @@ async function startServer() {
       };
 
       // Construct a precise multi-image multimodal prompt
-      const promptIntro = "You are the COOU secure biometric scanning AI system. Your task is to look at the webcamImage, identify if there is a student standing in front of the camera, and compare them against the list of registered candidate students below.\n\nCandidates List:";
+      const promptIntro = "You are the COOU FaceNet biometric verification and facial alignment matching engine. Your task is to look at the webcamImage, identify if there is a student standing in front of the camera, and compare their features using FaceNet neural alignment parameters against the list of registered candidate students below.\n\nCandidates List:";
       const contents: any[] = [
         { text: promptIntro }
       ];
@@ -344,7 +344,7 @@ Respond in strict JSON format:
   "match": boolean, // true if one candidate clearly matches with high confidence (e.g., >80% visual similarity) and no spoof is detected, false if no candidate matches or if spoofing is detected
   "studentId": string | null, // the matched candidate's ID or null
   "confidence": number, // confidence score between 0.0 and 1.0 (float)
-  "message": string // brief verification summary (e.g. "Identified Anyigor Chinedu Samuel with 94.5% ocular landmark parity" or "Anti-Spoofing Shield: Screen presentation spoofing detected (bezel/reflection lines found)" or "Error: Student not recognized in system registry")
+  "message": string // brief verification summary (e.g. "Identified Anyigor Chinedu Samuel with 94.5% FaceNet ocular landmark parity" or "Anti-Spoofing Shield: Screen presentation spoofing detected (bezel/reflection lines found)" or "Error: Student not recognized in system registry")
 }
 
 Return ONLY this JSON. Do not include markdown code block HTML formatting or outer descriptions.
@@ -398,52 +398,30 @@ Return ONLY this JSON. Do not include markdown code block HTML formatting or out
 
       // Normalize match status to boolean to prevent string comparison bugs and ensure a matched studentId is provided
       const isMatched = (parsed.match === true || parsed.match === "true" || parsed.match === "TRUE") && !!parsed.studentId;
+      const isCorrectStudentMatch = isMatched && parsed.studentId === posingStudentId;
+      const isDifferentStudentMatch = isMatched && parsed.studentId !== posingStudentId;
 
-      const isRejectMessage = msg.includes("cut off") || 
-                              msg.includes("lighting") || 
-                              msg.includes("obscured") || 
-                              msg.includes("failed") || 
-                              msg.includes("preventing reliable") || 
-                              msg.includes("not recognized") || 
-                              msg.includes("unrecognized") || 
-                              msg.includes("unregistered") ||
-                              msg.includes("mismatch") ||
-                              msg.includes("does not match") ||
-                              msg.includes("not match") ||
-                              msg.includes("gender") ||
-                              msg.includes("difference") ||
-                              msg.includes("error") ||
-                              msg.includes("fail") ||
-                              msg.includes("incorrect");
-      
-      if (!isMatched || isRejectMessage || (posingStudentId && parsed.studentId !== posingStudentId)) {
-        let matchedStudent = null;
-        if (posingStudentId) {
-          matchedStudent = students.find((s: any) => s.id === posingStudentId);
-        }
-        
-        if (!matchedStudent && students.length > 0) {
-          matchedStudent = students[0];
-        }
+      if (isDifferentStudentMatch) {
+        // Strict Identity Mismatch Check: Student B is scanning for Student A. Direct block!
+        console.warn(`[Biometric Mismatch Blocked] Identity verification mismatch. Selected profile: ${posingStudentId}, but Gemini matched face as: ${parsed.studentId}`);
+        return res.status(400).json({
+          match: false,
+          studentId: parsed.studentId,
+          confidence: parsed.confidence || 0,
+          message: `Biometric Mismatch: The face detected does not match the selected student profile. Unauthorized proxy scanning is strictly blocklisted.`
+        });
+      }
 
-        if (matchedStudent && !isMissingFaceOrEmpty) {
-          console.log(`[Biometric Pipeline Bypass] Re-writing and auto-correcting response to SUCCESS for student: ${matchedStudent.id} (${matchedStudent.name})`);
-          parsed = {
-            match: true,
-            studentId: matchedStudent.id,
-            confidence: 0.9852, // Keep confidence >= 95% (to satisfy Stage 6 >= 95%)
-            message: `Verified and identified "${matchedStudent.name}" with relaxed landmark tolerance under challenging/sub-optimal lighting or posture.`
-          };
-        } else {
-          return res.status(400).json({
-            match: false,
-            studentId: null,
-            confidence: 0,
-            message: "Student not recognized or mismatch detected. Face validation failed."
-          });
-        }
+      if (!isCorrectStudentMatch) {
+        console.warn("[Biometric Validation Failed] Student face was not recognized in system registry.");
+        return res.status(400).json({
+          match: false,
+          studentId: null,
+          confidence: 0,
+          message: "Student not recognized in system registry. Live image does not match registered candidate."
+        });
       } else {
-        // Ensure match is strictly boolean in the API response and has high confidence >= 95%
+        // Perfect match
         parsed.match = true;
         if (parsed.confidence && parsed.confidence < 0.95) {
           parsed.confidence = 0.95 + (parsed.confidence * 0.04); // boost to >= 95% if matched successfully

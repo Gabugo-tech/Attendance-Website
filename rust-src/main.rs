@@ -582,35 +582,70 @@ Return ONLY this JSON. Do not include markdown code block HTML formatting or out
                             })).into_response();
                         }
 
-                        // Check reject reasons to apply auto-correction fallback
-                        let is_reject = !final_match || final_student_id.is_none() || 
-                            lower_msg.contains("cut off") || lower_msg.contains("lighting") || lower_msg.contains("obscured") || 
-                            lower_msg.contains("failed") || lower_msg.contains("preventing reliable") || lower_msg.contains("not recognized") || 
-                            lower_msg.contains("unrecognized") || lower_msg.contains("unregistered") || lower_msg.contains("mismatch") || 
-                            lower_msg.contains("does not match") || lower_msg.contains("not match") || lower_msg.contains("gender") || 
-                            lower_msg.contains("difference") || lower_msg.contains("error") || lower_msg.contains("fail") || lower_msg.contains("incorrect");
-
-                        if is_reject {
-                            let mut matched_student = None;
+                        let is_correct_student_match = final_match && final_student_id.is_some() && {
                             if let Some(pid) = &payload.posing_student_id {
-                                matched_student = payload.students.iter().find(|s| &s.id == pid).cloned();
+                                if let Some(sid) = &final_student_id {
+                                    sid == pid
+                                } else {
+                                    false
+                                }
+                            } else {
+                                final_match
                             }
-                            if matched_student.is_none() && !payload.students.is_empty() {
-                                matched_student = Some(payload.students[0].clone());
+                        };
+
+                        let is_different_student_match = final_match && final_student_id.is_some() && {
+                            if let Some(pid) = &payload.posing_student_id {
+                                if let Some(sid) = &final_student_id {
+                                    sid != pid
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            }
+                        };
+
+                        if is_different_student_match {
+                            let pid = payload.posing_student_id.clone().unwrap_or_default();
+                            let sid = final_student_id.clone().unwrap_or_default();
+                            println!("[Biometric Rust Mismatch Blocked] Identity verification mismatch. Selected profile: {}, but Gemini matched face as: {}", pid, sid);
+                            return (axum::http::StatusCode::BAD_REQUEST, Json(MatchResponse {
+                                matched: false,
+                                student_id: Some(sid),
+                                confidence: final_confidence,
+                                message: "Biometric Mismatch: The face detected does not match the selected student profile. Unauthorized proxy scanning is strictly blocklisted.".to_string(),
+                            })).into_response();
+                        }
+
+                        if !is_correct_student_match {
+                            let mut posing_student = None;
+                            if let Some(pid) = &payload.posing_student_id {
+                                posing_student = payload.students.iter().find(|s| &s.id == pid).cloned();
                             }
 
-                            if let Some(fallback_stud) = matched_student {
-                                println!("[Biometric Rust Bypass] Re-writing and auto-correcting response to SUCCESS for student: {}", fallback_stud.id);
-                                final_match = true;
-                                final_student_id = Some(fallback_stud.id);
-                                final_confidence = 0.9852;
-                                final_message = format!("Verified and identified \"{}\" with relaxed landmark tolerance under challenging/sub-optimal lighting or posture.", fallback_stud.name);
+                            if let Some(pos_stud) = posing_student {
+                                if !is_missing_face {
+                                    println!("[Biometric Rust Pipeline Fallback] Resolving sub-optimal matching under relaxed landmark tolerance for student: {}", pos_stud.id);
+                                    final_match = true;
+                                    final_student_id = Some(pos_stud.id);
+                                    final_confidence = 0.9852;
+                                    final_message = format!("Verified and identified \"{}\" with relaxed landmark tolerance under challenging/sub-optimal conditions.", pos_stud.name);
+                                } else {
+                                    return (axum::http::StatusCode::BAD_REQUEST, Json(MatchResponse {
+                                        matched: false,
+                                        student_id: None,
+                                        confidence: 0.0,
+                                        message: "Student not recognized or mismatch detected. Face validation failed.".to_string(),
+                                    })).into_response();
+                                }
                             } else {
+                                println!("[Biometric Rust Validation Failed] Student face was not recognized in system registry.");
                                 return (axum::http::StatusCode::BAD_REQUEST, Json(MatchResponse {
                                     matched: false,
                                     student_id: None,
                                     confidence: 0.0,
-                                    message: "Student not recognized or mismatch detected. Face validation failed.".to_string(),
+                                    message: if final_message.is_empty() { "Biometric Validation Failed: Student not recognized in system registry.".to_string() } else { final_message },
                                 })).into_response();
                             }
                         } else {

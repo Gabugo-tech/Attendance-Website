@@ -346,3 +346,21 @@ export async function saveRecordToDb(record: AttendanceRecord): Promise<void> {
     notifySyncStatusChange();
   }
 }
+
+export async function deleteRecordFromDb(recordId: string): Promise<void> {
+  const current = await getRecordsFromDb();
+  const updated = current.filter(r => r.id !== recordId);
+  localStorage.setItem('coou_records', JSON.stringify(updated));
+
+  if (isMockFirebase || !db) {
+    return;
+  }
+  try {
+    const { deleteDoc } = await import('firebase/firestore');
+    await deleteDoc(doc(db, 'records', recordId));
+    console.log('[Sync Engine] Successfully deleted record from Cloud Firestore.');
+  } catch (err) {
+    console.error('[Sync Engine] Failed To delete record from cloud', err);
+  }
+}
+

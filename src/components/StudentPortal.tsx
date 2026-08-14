@@ -173,6 +173,7 @@ export default function StudentPortal({
     _setFaceObscured(val);
   };
   const [regFaceObscured, setRegFaceObscured] = useState<boolean>(false);
+  const [regFaceNotCentered, setRegFaceNotCentered] = useState<boolean>(false);
 
   // Recent scans attempt history
   const [recentScans, setRecentScans] = useState<Array<{
@@ -308,6 +309,9 @@ export default function StudentPortal({
   // State for momentary full-screen success flash indicator
   const [showGreenFlash, setShowGreenFlash] = useState<boolean>(false);
 
+  // State for subtle toast notification verifying server sync
+  const [syncToast, setSyncToast] = useState<{ show: boolean; title: string; message: string; subMessage?: string } | null>(null);
+
   // Helper for real-time visual reticle feedback
   const getDynamicScannerText = (progress: number, state: 'idle' | 'scanning' | 'success' | 'failed') => {
     if (state === 'success') return 'Match Confirmed!';
@@ -382,6 +386,25 @@ export default function StudentPortal({
   const [liveStudentFound, setLiveStudentFound] = useState<string>('N/A');
   const [liveAttendanceStatus, setLiveAttendanceStatus] = useState<string>('IDLE');
   const [consecutiveMatchCycles, setConsecutiveMatchCycles] = useState<number>(0);
+
+  // Derived state to identify if the biometric camera is in the verification/consensus phase
+  const isVerifying = liveAttendanceStatus !== 'IDLE' && liveAttendanceStatus !== 'PRESENT' && !liveAttendanceStatus.includes('REJECTED');
+
+  const getVerificationProgress = () => {
+    if (liveAttendanceStatus === 'STAGE 1: FACE DETECT') return 15;
+    if (liveAttendanceStatus === 'STAGE 2: QUALITY OK') return 30;
+    if (liveAttendanceStatus === 'STAGE 3: LIVENESS CHG') return 45;
+    if (liveAttendanceStatus === 'STAGE 4: VECTOR EXTRACT') return 60;
+    if (liveAttendanceStatus === 'STAGE 5-7: CONSENSUS') return 70;
+    if (liveAttendanceStatus.includes('CONSENSUS:')) {
+      const match = liveAttendanceStatus.match(/CONSENSUS:\s*(\d)\/5/);
+      if (match) {
+        const frameNum = parseInt(match[1], 10);
+        return 70 + (frameNum * 6); // 76%, 82%, 88%, 94%, 100%
+      }
+    }
+    return 0;
+  };
 
   React.useEffect(() => {
     let active = true;
@@ -472,6 +495,7 @@ export default function StudentPortal({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [regCameraStream, setRegCameraStream] = useState<MediaStream | null>(null);
+  const [isSimulatedCamera, setIsSimulatedCamera] = useState<boolean>(false);
 
   // Passkey simulated modal
   const [showPasskeyPrompt, setShowPasskeyPrompt] = useState<boolean>(false);
@@ -548,10 +572,12 @@ export default function StudentPortal({
       });
       streamRef.current = stream;
       setCameraStream(stream);
+      setIsSimulatedCamera(false);
     } catch (err) {
       console.warn("Could not initiate actual camera stream. Falling back to simulated lens.", err);
       streamRef.current = null;
       setCameraStream(null);
+      setIsSimulatedCamera(true);
     }
   };
 
@@ -561,6 +587,7 @@ export default function StudentPortal({
       streamRef.current = null;
     }
     setCameraStream(null);
+    setIsSimulatedCamera(false);
   };
 
   // Sync video source objects whenever elements mount or stream states change
@@ -706,7 +733,15 @@ export default function StudentPortal({
 
   // Capture face photo snapshot
   const capturePhoto = () => {
-    if ((streamRef.current || cameraStream) && videoRef.current && canvasRef.current) {
+    const activeStream = streamRef.current || cameraStream;
+    if (activeStream && videoRef.current && canvasRef.current) {
+      // Ensure there is an active, live video track
+      const tracks = activeStream.getTracks();
+      const hasLiveTrack = tracks.some(t => t.kind === 'video' && t.readyState === 'live' && t.enabled);
+      if (!hasLiveTrack) {
+        return '';
+      }
+
       const video = videoRef.current;
       const canvas = canvasRef.current;
       canvas.width = 320;
@@ -724,10 +759,15 @@ export default function StudentPortal({
         setCapturedSnapshot(dataUrl);
         return dataUrl;
       }
+    } else if (isSimulatedCamera) {
+      // Fallback simulated portrait from selected student
+      const student = students.find(s => s.id === selectedStudentId);
+      const photoUrl = student ? student.photoUrl : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&h=150&fit=crop';
+      setCapturedSnapshot(photoUrl);
+      return photoUrl;
     }
-    // Fallback simulated portrait from selected student
-    const student = students.find(s => s.id === selectedStudentId);
-    return student ? student.photoUrl : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&h=150&fit=crop';
+    // Return empty if camera is closed or blocked
+    return '';
   };
 
   const startRegCamera = async () => {
@@ -772,8 +812,16 @@ export default function StudentPortal({
 
   const captureRegFaceSequence = async () => {
     if (!regStreamRef.current || !regVideoRef.current) return;
-    if (regFaceObscured || isRegLowLight) {
-      setRegCaptureStatus("❌ BIOMETRIC ERROR: Remove face coverings & improve lighting before starting registry!");
+    if (regFaceObscured || isRegLowLight || regFaceNotCentered) {
+      setRegCaptureStatus(
+        `❌ BIOMETRIC ERROR: ${
+          regFaceNotCentered 
+            ? "Center your face in the frame" 
+            : regFaceObscured 
+              ? "Remove face coverings" 
+              : "Improve ambient lighting"
+        } before starting registry!`
+      );
       return;
     }
     setIsRegCapturing(true);
@@ -788,9 +836,10 @@ export default function StudentPortal({
 
     try {
       setRegCaptureStatus("Initializing deep neural meshes...");
-      await faceapi.nets.ssdMobilenetv1.loadFromUri('/models').catch(() => {});
-      await faceapi.nets.faceLandmark68Net.loadFromUri('/models').catch(() => {});
-      await faceapi.nets.faceRecognitionNet.loadFromUri('/models').catch(() => {});
+      const modelUrl = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/";
+      await faceapi.nets.ssdMobilenetv1.loadFromUri(modelUrl);
+      await faceapi.nets.faceLandmark68Net.loadFromUri(modelUrl);
+      await faceapi.nets.faceRecognitionNet.loadFromUri(modelUrl);
     } catch (e) {
       console.warn("Models preparation fallback", e);
     }
@@ -939,7 +988,7 @@ export default function StudentPortal({
 
     setIsRegCapturing(false);
     if (tempCaptures.length >= 4) {
-      setRegCaptureStatus("🔒 4-Angle Spatial Biometrics Enrolled! Neural signatures extracted and secure key hashed.");
+      setRegCaptureStatus("🔒 FaceNet Registration Completed! FaceNet Biometric Info Registered successfully.");
       setRegPhoto(tempCaptures[0]); // Default front view as visual representative
       stopRegCamera();
       playSuccessChime();
@@ -1055,7 +1104,7 @@ export default function StudentPortal({
     setRegCaptures([]);
     setRegDescriptors([]);
     setRegConsentChecked(false);
-    setRegCameraActive(false);
+    stopRegCamera();
     setRegCaptureStatus('');
   };
 
@@ -1168,10 +1217,10 @@ export default function StudentPortal({
 
   const updateScanMessage = (method: 'facial_recognition' | 'fingerprint_scan' | 'device_passkey', progress: number) => {
     if (method === 'facial_recognition') {
-      if (progress < 30) setScanMessage('LENS INITIALIZED: Searching for face coordinates...');
-      else if (progress < 60) setScanMessage('FACE IDENTIFIED: Aligning nose and ocular landmarks...');
-      else if (progress < 85) setScanMessage('EXTRACTING FEATURE ENVELOPE: Securing mathematically hashed vectors...');
-      else setScanMessage('CROSS-MATCHING: Verifying features against COOU biometric registry...');
+      if (progress < 30) setScanMessage('LENS INITIALIZED: Searching for face coordinates via FaceNet-V1...');
+      else if (progress < 60) setScanMessage('FACE IDENTIFIED: Aligning nose and ocular landmarks with FaceNet...');
+      else if (progress < 85) setScanMessage('EXTRACTING FEATURE ENVELOPE: Securing mathematically hashed FaceNet descriptors...');
+      else setScanMessage('CROSS-MATCHING: Verifying features against COOU FaceNet registry...');
     } else if (method === 'fingerprint_scan') {
       if (progress < 30) setScanMessage('SENSOR WARMUP: Scanning epidermal friction ridges...');
       else if (progress < 60) setScanMessage('DETAIL CAPTURE: Measuring minutiae core and bifurcation tags...');
@@ -1193,17 +1242,35 @@ export default function StudentPortal({
       }, 750);
 
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
-      osc.frequency.setValueAtTime(880.00, audioCtx.currentTime + 0.1); // A5
-      gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.005, audioCtx.currentTime + 0.35);
-      osc.start();
-      osc.stop(audioCtx.currentTime + 0.35);
+      const now = audioCtx.currentTime;
+      
+      // Master gain for pleasant volume and exponential decay
+      const masterGain = audioCtx.createGain();
+      masterGain.connect(audioCtx.destination);
+      masterGain.gain.setValueAtTime(0.05, now);
+      masterGain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+
+      // Create three harmonized sine wave oscillators playing a subtle arpeggiated G-Major chord
+      // G5 (783.99Hz), B5 (987.77Hz), D6 (1174.66Hz)
+      const freqs = [783.99, 987.77, 1174.66];
+      freqs.forEach((freq, idx) => {
+        const osc = audioCtx.createOscillator();
+        const oscGain = audioCtx.createGain();
+        
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.06);
+        
+        // Gentle individual envelope to avoid audio clipping
+        oscGain.gain.setValueAtTime(0.0, now);
+        oscGain.gain.linearRampToValueAtTime(0.3, now + idx * 0.06 + 0.02);
+        oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+        
+        osc.connect(oscGain);
+        oscGain.connect(masterGain);
+        
+        osc.start(now + idx * 0.06);
+        osc.stop(now + 0.5);
+      });
     } catch (e) {}
   };
 
@@ -1237,6 +1304,11 @@ export default function StudentPortal({
     let snapBytes = '';
     if (method === 'facial_recognition') {
       snapBytes = capturePhoto();
+      if (!snapBytes) {
+        setScanState('failed');
+        setScanMessage('CAMERA ERROR: Webcam stream is offline, closed, or blocked. FaceNet biometric verification requires a live, active camera stream.');
+        return;
+      }
     } else {
       const student = students.find(s => s.id === selectedStudentId);
       snapBytes = student ? student.photoUrl : '';
@@ -1256,6 +1328,29 @@ export default function StudentPortal({
         setLiveStudentFound('Searching');
         setLiveAttendanceStatus('STAGE 1: FACE DETECT');
         setConsecutiveMatchCycles(0);
+
+        // Check if camera is closed/offline
+        if (!isSimulatedCamera && (!streamRef.current || !cameraStream)) {
+          setLiveFaceDetected('No');
+          setLiveAttendanceStatus('REJECTED');
+          throw new Error('CAMERA ERROR: Webcam stream is offline, closed, or blocked. FaceNet biometric verification requires a live, active camera stream.');
+        }
+
+        if (!snapBytes) {
+          setLiveFaceDetected('No');
+          setLiveAttendanceStatus('REJECTED');
+          throw new Error('CAMERA ERROR: Webcam stream is offline, closed, or blocked. FaceNet biometric verification requires a live, active camera stream.');
+        }
+
+        if (!isSimulatedCamera) {
+          const activeTracks = streamRef.current!.getTracks();
+          const hasLiveVideoTrack = activeTracks.some(track => track.kind === 'video' && track.readyState === 'live' && track.enabled);
+          if (!hasLiveVideoTrack) {
+            setLiveFaceDetected('No');
+            setLiveAttendanceStatus('REJECTED');
+            throw new Error('CAMERA ERROR: Live video track is inactive, muted, or closed. Please ensure your web camera is on and active.');
+          }
+        }
 
         // Strict validation: Reject obscured face or low ambient lighting
         if (faceObscuredRef.current) {
@@ -1287,7 +1382,7 @@ export default function StudentPortal({
 
         // Stage 4 & 5: Extract Face Embedding and Compare Course Candidates
         setLiveAttendanceStatus('STAGE 4: VECTOR EXTRACT');
-        setScanMessage('Stage 4 & 5: Extracting facial landmark vectors & identifying course enrollment...');
+        setScanMessage('Stage 4 & 5: Extracting FaceNet biometric descriptors & identifying course enrollment...');
         await new Promise(resolve => setTimeout(resolve, 500));
 
         // Stage 7: Confirmation across 5 consecutive frames
@@ -1303,6 +1398,10 @@ export default function StudentPortal({
           await new Promise(resolve => setTimeout(resolve, 400));
           
           latestSnap = capturePhoto();
+          if (!latestSnap) {
+            setConsecutiveMatchCycles(0);
+            throw new Error('CAMERA ERROR: Lost camera feed or camera was closed/blocked during multi-frame consensus evaluation.');
+          }
 
           const response = await fetch('/api/facial-recognition-match', {
             method: 'POST',
@@ -1430,6 +1529,18 @@ export default function StudentPortal({
           setLiveAttendanceStatus('PRESENT');
           logScanAttempt(matchedStudent.name, 'SUCCESS');
           setShowAnimatedSuccessScreen(true);
+          
+          // Subtle synchronization toast confirmation
+          setSyncToast({
+            show: true,
+            title: 'Attendance Synced Successfully',
+            message: `Student: ${matchedStudent.name} (${matchedStudent.regNo})`,
+            subMessage: 'Secure FaceNet match synchronized to COOU cloud servers.'
+          });
+          setTimeout(() => {
+            setSyncToast(null);
+          }, 4500);
+
           setTimeout(() => {
             setShowAnimatedSuccessScreen(false);
           }, 2100);
@@ -1610,6 +1721,42 @@ export default function StudentPortal({
             transition={{ duration: 0.6, ease: "easeOut" }}
             className="fixed inset-0 z-[100] bg-emerald-400 pointer-events-none mix-blend-color-dodge shadow-[inset_0_0_100px_rgba(52,211,153,0.9)]"
           />
+        )}
+      </AnimatePresence>
+
+      {/* Subtle Toast Notification verifying successful server sync */}
+      <AnimatePresence>
+        {syncToast && syncToast.show && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            transition={{ type: "spring", damping: 25, stiffness: 350 }}
+            className="fixed top-6 right-6 z-[110] max-w-sm w-full bg-slate-900 border border-slate-800 text-white rounded-xl shadow-2xl p-4 flex items-start space-x-3.5"
+          >
+            <div className="bg-emerald-500/10 border border-emerald-500/20 p-2 rounded-lg text-emerald-400 shrink-0 mt-0.5 animate-pulse">
+              <CheckCircle2 className="h-5 w-5" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-xs font-extrabold text-white uppercase tracking-wider font-sans">
+                {syncToast.title}
+              </h3>
+              <p className="text-xs text-slate-200 mt-1 font-medium font-sans">
+                {syncToast.message}
+              </p>
+              {syncToast.subMessage && (
+                <p className="text-[10px] text-emerald-400 mt-1 font-mono leading-relaxed">
+                  ✓ {syncToast.subMessage}
+                </p>
+              )}
+            </div>
+            <button 
+              onClick={() => setSyncToast(null)}
+              className="text-slate-400 hover:text-white transition shrink-0 self-start text-xs font-bold px-1 py-0.5 rounded hover:bg-slate-800 cursor-pointer"
+            >
+              ✕
+            </button>
+          </motion.div>
         )}
       </AnimatePresence>
       
@@ -2071,7 +2218,7 @@ export default function StudentPortal({
                         Strong Template Encryption (GDPR/BIPA)
                       </label>
                       <span className="block text-[9px] text-slate-500 leading-tight">
-                        Converts facial features immediately into static secure mathematical templates. Raw vector Base64 frames are permanently purged from RAM/databases.
+                        Converts FaceNet facial landmarks immediately into static secure mathematical templates. Raw vector Base64 frames are permanently purged from RAM/databases.
                       </span>
                     </div>
                   </div>
@@ -2201,15 +2348,29 @@ export default function StudentPortal({
                           style={getFilterStyle(cameraFilter)}
                           className="w-full h-full object-cover"
                         />
-                        {/* Low Light Registration Warning */}
-                        {isRegLowLight && (
-                          <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-amber-500 text-slate-955 font-mono text-[8px] font-black px-1.5 py-0.5 rounded border border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.5)] z-25 flex items-center space-x-1 animate-pulse">
-                            <AlertTriangle className="h-2 w-2 text-slate-955 stroke-[4px]" />
-                            <span>REG_LOW_LIGHT_WARNING</span>
+                        {/* Quality Alert Overlays */}
+                        {(isRegLowLight || regFaceNotCentered || regFaceObscured) && (
+                          <div className="absolute top-2 inset-x-2 bg-slate-950/95 border border-rose-500/50 rounded p-1.5 z-25 flex items-start space-x-1.5 shadow-2xl animate-pulse">
+                            <AlertTriangle className={`h-3 w-3 shrink-0 ${regFaceNotCentered || regFaceObscured ? 'text-rose-400' : 'text-amber-400'} mt-0.5 animate-bounce`} />
+                            <div className="flex-1 text-left">
+                              <span className="block text-[7.5px] font-black tracking-widest text-white uppercase font-mono">
+                                {regFaceNotCentered ? 'CENTERING DEFICIT' : regFaceObscured ? 'OCCLUSION DETECTED' : 'LOW LUMINANCE'}
+                              </span>
+                              <span className="block text-[6.5px] text-zinc-400 leading-normal font-sans font-semibold">
+                                {regFaceNotCentered 
+                                  ? 'Face must be centered inside the oval guide overlay.' 
+                                  : regFaceObscured 
+                                    ? 'Obstruction detected. Please remove glasses or headwear.' 
+                                    : 'Insufficient lighting. Turn on more lights or enable NV filter.'}
+                              </span>
+                            </div>
                           </div>
                         )}
                         {isRegLowLight && (
                           <div className="absolute inset-0 bg-amber-500/10 pointer-events-none z-10 animate-pulse border-2 border-amber-500/30 rounded-lg" />
+                        )}
+                        {regFaceNotCentered && (
+                          <div className="absolute inset-0 bg-red-500/10 pointer-events-none z-10 animate-pulse border-2 border-red-500/30 rounded-lg" />
                         )}
                         {isRegCapturing && (
                           <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-20">
@@ -2289,7 +2450,9 @@ export default function StudentPortal({
                               </radialGradient>
                             </defs>
 
-                            {/* 1. HEATMAP COVERAGE LAYER (glowing Gaussian blurred blobs) */}
+                            {/* Face mesh alignment tracking parent group */}
+                            <g transform={regFaceNotCentered ? "translate(-45, -25)" : "none"} className="transition-transform duration-500 ease-out">
+                              {/* 1. HEATMAP COVERAGE LAYER (glowing Gaussian blurred blobs) */}
                             <g opacity="0.65">
                               {/* Left eye coverage glow */}
                               <circle cx="136" cy="110" r="22" fill="url(#heat-glow-eyel)" filter="url(#heatmap-blur)" />
@@ -2397,8 +2560,9 @@ export default function StudentPortal({
                               <circle cx="200" cy="115" r="1.5" />
                               <circle cx="205" cy="85" r="1.5" />
                             </g>
+                          </g>
 
-                            {/* 5. MILITARY/SCI-FI LABELS & DIGITAL TELEMETRY READOUTS OVERLAYED IN CORNERS */}
+                          {/* 5. MILITARY/SCI-FI LABELS & DIGITAL TELEMETRY READOUTS OVERLAYED IN CORNERS */}
                             <g fontFamily="monospace" fontSize="5.5" fontWeight="900" fill={regFaceObscured ? '#f43f5e' : isRegLowLight ? '#f59e0b' : '#22d3ee'}>
                               {/* Top-left Diagnostics */}
                               <text x="12" y="20" letterSpacing="0.5" opacity="0.85">BIOMETRIC MESH: ENROLL_v7.2</text>
@@ -2406,14 +2570,16 @@ export default function StudentPortal({
                               <text x="12" y="36" letterSpacing="0.5" opacity="0.7">REFRESH RATE: 60FPS [LOCKED]</text>
 
                               {/* Top-right Status Indicators */}
-                              <text x="308" y="20" textAnchor="end" letterSpacing="0.5" opacity="0.85">ALIGN: {regFaceObscured ? 'OBSTRUCTED' : isRegLowLight ? 'LOW LIGHT' : 'OPTIMAL'}</text>
-                              <text x="308" y="28" textAnchor="end" letterSpacing="0.5" opacity="0.7">COVERAGE: {regFaceObscured ? '28%' : isRegLowLight ? '65%' : '98%'}</text>
-                              <text x="308" y="36" textAnchor="end" letterSpacing="0.5" opacity="0.7">SYMMETRY INDEX: {regFaceObscured ? 'FAIL' : '96.2%'}</text>
+                              <text x="308" y="20" textAnchor="end" letterSpacing="0.5" opacity="0.85" fill={regFaceNotCentered ? '#f87171' : regFaceObscured ? '#f43f5e' : isRegLowLight ? '#f59e0b' : '#22d3ee'}>
+                                ALIGN: {regFaceNotCentered ? 'OFF-CENTER' : regFaceObscured ? 'OBSTRUCTED' : isRegLowLight ? 'LOW LIGHT' : 'OPTIMAL'}
+                              </text>
+                              <text x="308" y="28" textAnchor="end" letterSpacing="0.5" opacity="0.7">COVERAGE: {regFaceNotCentered ? '42%' : regFaceObscured ? '28%' : isRegLowLight ? '65%' : '98%'}</text>
+                              <text x="308" y="36" textAnchor="end" letterSpacing="0.5" opacity="0.7">SYMMETRY INDEX: {regFaceNotCentered ? 'POOR' : regFaceObscured ? 'FAIL' : '96.2%'}</text>
                               
                               {/* Bottom-left Coordinates Tracking */}
-                              <text x="12" y="222" letterSpacing="0.5" opacity="0.6">X-NODE: 160.030 Y-NODE: 121.942</text>
-                              <text x="12" y="230" letterSpacing="0.5" opacity="0.7" fill={regFaceObscured ? '#f43f5e' : '#34d399'}>
-                                STATUS: {regFaceObscured ? "[!] CORE BLOCKED" : "[+] HANDSHAKE READY"}
+                              <text x="12" y="222" letterSpacing="0.5" opacity="0.6">X-NODE: {regFaceNotCentered ? '65.412 [DRIFT]' : '160.030'} Y-NODE: {regFaceNotCentered ? '82.110 [DRIFT]' : '121.942'}</text>
+                              <text x="12" y="230" letterSpacing="0.5" opacity="0.7" fill={regFaceNotCentered ? '#f87171' : regFaceObscured ? '#f43f5e' : '#34d399'}>
+                                STATUS: {regFaceNotCentered ? "[!] POSITION ERROR" : regFaceObscured ? "[!] CORE BLOCKED" : "[+] HANDSHAKE READY"}
                               </text>
 
                               {/* Bottom-right dynamic liveness score */}
@@ -2424,9 +2590,9 @@ export default function StudentPortal({
 
                           {/* Centered blinking recording state indicator at the top */}
                           <div className="absolute top-2 left-1/2 -translate-x-1/2 flex items-center space-x-1 bg-slate-950/80 px-2 py-0.5 rounded border border-white/5 scale-90">
-                            <span className={`h-1.5 w-1.5 rounded-full ${regFaceObscured ? 'bg-rose-500' : isRegLowLight ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500 animate-pulse'}`} />
+                            <span className={`h-1.5 w-1.5 rounded-full ${regFaceNotCentered ? 'bg-red-500 animate-pulse' : regFaceObscured ? 'bg-rose-500' : isRegLowLight ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500 animate-pulse'}`} />
                             <span className="text-[7px] text-zinc-350 font-mono tracking-widest uppercase font-black">
-                              {regFaceObscured ? 'Alignment Interrupted' : isRegLowLight ? 'Luminance Warning' : 'Landmark Sync Active'}
+                              {regFaceNotCentered ? 'ALIGNMENT DEFICIT' : regFaceObscured ? 'Alignment Interrupted' : isRegLowLight ? 'Luminance Warning' : 'Landmark Sync Active'}
                             </span>
                           </div>
 
@@ -2434,9 +2600,9 @@ export default function StudentPortal({
                           <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-slate-950/90 text-white border border-slate-700 px-2 py-0.5 rounded text-[6.5px] font-black font-mono tracking-widest shadow-lg uppercase flex items-center space-x-1.5 z-20">
                             <span className="animate-ping h-1 w-1 rounded-full bg-cyan-400" />
                             <span className={
-                              regFaceObscured ? 'text-rose-450' : isRegLowLight ? 'text-amber-400' : 'text-cyan-400'
+                              regFaceNotCentered ? 'text-red-400' : regFaceObscured ? 'text-rose-450' : isRegLowLight ? 'text-amber-400' : 'text-cyan-400'
                             }>
-                              {regFaceObscured ? 'REMOVE FACE COVERINGS' : isRegLowLight ? 'INCREASE LOCAL AMBIENT LIGHT' : 'KEEP STILL • READY FOR CAPTURE'}
+                              {regFaceNotCentered ? 'CENTER YOUR FACE IN THE FRAME' : regFaceObscured ? 'REMOVE FACE COVERINGS' : isRegLowLight ? 'INCREASE LOCAL AMBIENT LIGHT' : 'KEEP STILL • READY FOR CAPTURE'}
                             </span>
                           </div>
                         </div>
@@ -2516,7 +2682,8 @@ export default function StudentPortal({
                       {(() => {
                         const lightingScore = isRegLowLight ? 30 : 96;
                         const obstructionScore = regFaceObscured ? 20 : 98;
-                        const overallScore = Math.round((lightingScore + obstructionScore) / 2);
+                        const centeringScore = regFaceNotCentered ? 25 : 95;
+                        const overallScore = Math.round((lightingScore + obstructionScore + centeringScore) / 3);
                         const isOptimal = overallScore >= 70;
                         
                         return (
@@ -2530,24 +2697,34 @@ export default function StudentPortal({
                               </span>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-2 text-[8px] font-mono text-white">
+                            <div className="grid grid-cols-3 gap-1.5 text-[7px] md:text-[8px] font-mono text-white">
                               <div className="bg-slate-950 p-1.5 rounded border border-white/5 space-y-0.5">
-                                <span className="text-zinc-500 block uppercase">Ambient Lighting:</span>
+                                <span className="text-zinc-500 block uppercase">Lighting:</span>
                                 <div className="flex items-center justify-between">
                                   <span className={isRegLowLight ? 'text-amber-400 font-bold animate-pulse' : 'text-emerald-400 font-bold'}>
-                                    {isRegLowLight ? 'Poor (Dim)' : 'Optimal'}
+                                    {isRegLowLight ? 'Poor' : 'Optimal'}
                                   </span>
                                   <span className="text-zinc-400">{lightingScore}%</span>
                                 </div>
                               </div>
 
                               <div className="bg-slate-950 p-1.5 rounded border border-white/5 space-y-0.5">
-                                <span className="text-zinc-500 block uppercase">Obstruction Level:</span>
+                                <span className="text-zinc-500 block uppercase">Occlusion:</span>
                                 <div className="flex items-center justify-between">
                                   <span className={regFaceObscured ? 'text-rose-400 font-bold animate-pulse' : 'text-emerald-400 font-bold'}>
-                                    {regFaceObscured ? 'Obscured' : 'No Coverings'}
+                                    {regFaceObscured ? 'Obscured' : 'Clear'}
                                   </span>
                                   <span className="text-zinc-400">{obstructionScore}%</span>
+                                </div>
+                              </div>
+
+                              <div className="bg-slate-950 p-1.5 rounded border border-white/5 space-y-0.5">
+                                <span className="text-zinc-500 block uppercase">Centering:</span>
+                                <div className="flex items-center justify-between">
+                                  <span className={regFaceNotCentered ? 'text-red-400 font-bold animate-pulse' : 'text-emerald-400 font-bold'}>
+                                    {regFaceNotCentered ? 'Off-Center' : 'Centered'}
+                                  </span>
+                                  <span className="text-zinc-400">{centeringScore}%</span>
                                 </div>
                               </div>
                             </div>
@@ -2563,30 +2740,51 @@ export default function StudentPortal({
                             </div>
 
                             {!isOptimal && (
-                              <div className="bg-rose-500/10 border border-rose-500/20 rounded p-1.5 text-[8px] text-rose-300 leading-relaxed font-semibold">
-                                ⚠ {regFaceObscured 
-                                  ? 'FACE PARTIALLY OBSCURED: Neural path matching blocked. Please remove glasses or headwear.' 
-                                  : 'ILLUMINATION WARNING: Relative luminance below threshold. Move to a well-lit space or activate NV filter.'}
+                              <div className="bg-rose-500/10 border border-rose-500/20 rounded p-1.5 text-[8px] text-rose-300 leading-relaxed font-semibold space-y-1">
+                                {regFaceObscured && (
+                                  <div>⚠ FACE PARTIALLY OBSCURED: Neural path matching blocked. Please remove glasses or headwear.</div>
+                                )}
+                                {isRegLowLight && (
+                                  <div>⚠ ILLUMINATION WARNING: Relative luminance below threshold. Move to a well-lit space or activate NV filter.</div>
+                                )}
+                                {regFaceNotCentered && (
+                                  <div>⚠ POSITION WARNING: Face is not properly centered. Align your head with the center guide overlay.</div>
+                                )}
                               </div>
                             )}
 
                             {/* Simulation control inside the audit panel */}
-                            <div className="flex items-center justify-between pt-1 border-t border-white/5 text-[8.5px]">
-                              <span className="text-zinc-500 flex items-center gap-1">
-                                <Sparkles className="h-2.5 w-2.5 text-cyan-400" />
-                                <span>Simulate Face Occlusion</span>
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => setRegFaceObscured(!regFaceObscured)}
-                                className={`px-2 py-0.5 rounded border text-[8px] font-bold transition-all ${
-                                  regFaceObscured 
-                                    ? 'bg-rose-600/20 text-rose-300 border-rose-500' 
-                                    : 'bg-slate-950 text-zinc-400 border-slate-800 hover:text-white'
-                                }`}
-                              >
-                                {regFaceObscured ? 'Covered Active' : 'Simulate Obscured'}
-                              </button>
+                            <div className="flex flex-col space-y-1.5 pt-1.5 border-t border-white/5">
+                              <div className="flex items-center justify-between text-[8px]">
+                                <span className="text-zinc-500 flex items-center gap-1">
+                                  <Sparkles className="h-2.5 w-2.5 text-cyan-400" />
+                                  <span>Simulate Biometric Faults:</span>
+                                </span>
+                              </div>
+                              <div className="flex gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setRegFaceObscured(!regFaceObscured)}
+                                  className={`flex-1 py-1 rounded border text-[7.5px] font-bold transition-all ${
+                                    regFaceObscured 
+                                      ? 'bg-rose-600/20 text-rose-300 border-rose-500/50 shadow-[0_0_8px_rgba(244,63,94,0.15)]' 
+                                      : 'bg-slate-950 text-zinc-400 border-slate-800 hover:text-white hover:border-zinc-700'
+                                  }`}
+                                >
+                                  {regFaceObscured ? 'Occluded [Active]' : 'Toggle Occlusion'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setRegFaceNotCentered(!regFaceNotCentered)}
+                                  className={`flex-1 py-1 rounded border text-[7.5px] font-bold transition-all ${
+                                    regFaceNotCentered 
+                                      ? 'bg-red-600/20 text-red-300 border-red-500/50 shadow-[0_0_8px_rgba(239,68,68,0.15)]' 
+                                      : 'bg-slate-950 text-zinc-400 border-slate-800 hover:text-white hover:border-zinc-700'
+                                  }`}
+                                >
+                                  {regFaceNotCentered ? 'Off-Center [Active]' : 'Toggle Centering'}
+                                </button>
+                              </div>
                             </div>
                           </div>
                         );
@@ -2742,8 +2940,8 @@ export default function StudentPortal({
                     <span className="font-semibold text-slate-800">ACTIVE (500m)</span>
                   </div>
                   <div className="flex items-center justify-between text-xs text-slate-600 mt-0.5">
-                    <span>Facial Recognition Lock:</span>
-                    <span className="font-semibold text-slate-800">ENABLED (Webcam)</span>
+                    <span>FaceNet Biometric Lock:</span>
+                    <span className="font-semibold text-slate-800">ENABLED (FaceNet-V1)</span>
                   </div>
                 </div>
               ) : (
@@ -2772,8 +2970,8 @@ export default function StudentPortal({
             </div>
             
             {currentSession && selectedStudentId && !alreadyCheckedIn && (
-              <div className="rounded bg-slate-800 px-2.5 py-1 border border-slate-700 text-[10px] uppercase font-bold text-blue-400">
-                Facial Scan Mode Only
+              <div className="rounded bg-slate-800 px-2.5 py-1 border border-slate-700 text-[10px] uppercase font-bold text-blue-400 font-mono">
+                FaceNet Biometric Mode Only
               </div>
             )}
           </div>
@@ -2829,8 +3027,8 @@ export default function StudentPortal({
                     id="biometric-selection-options"
                   >
                     <div className="text-center space-y-1">
-                      <h3 className="text-sm font-bold text-white uppercase tracking-widest text-amber-400">Facial Recognition Gateway</h3>
-                      <p className="text-xs text-zinc-400">COOU Anti-Impersonation guard: Facial scan verification strictly enforced.</p>
+                      <h3 className="text-sm font-bold text-white uppercase tracking-widest text-amber-400">FaceNet Biometric Gateway</h3>
+                      <p className="text-xs text-zinc-400">COOU Anti-Impersonation guard: FaceNet facial scan verification strictly enforced.</p>
                     </div>
 
                     <div className="flex flex-col items-center justify-center p-6 rounded-xl border-2 border-dashed border-slate-700 bg-slate-800/20 max-w-md mx-auto space-y-5">
@@ -2838,9 +3036,9 @@ export default function StudentPortal({
                         <Camera className="h-8 w-8" />
                       </div>
                       <div className="text-center space-y-1.5">
-                        <span className="block text-xs font-bold text-white uppercase tracking-wider">Facial Verification Required</span>
+                        <span className="block text-xs font-bold text-white uppercase tracking-wider">FaceNet Verification Required</span>
                         <p className="text-[11px] text-zinc-400 max-w-sm leading-relaxed">
-                          Please look directly into the camera lens with sufficient lighting. The terminal will capture face vectors to verify identity against Chukwuemeka Odumegwu Ojukwu University archives.
+                          Please look directly into the camera lens with sufficient lighting. The terminal will capture FaceNet facial vectors to verify identity against Chukwuemeka Odumegwu Ojukwu University archives.
                         </p>
                       </div>
 
@@ -2854,8 +3052,8 @@ export default function StudentPortal({
                           className="mt-0.5 rounded border-slate-600 bg-slate-700 text-amber-500 focus:ring-amber-500 h-3.5 w-3.5 cursor-pointer shrink-0"
                         />
                         <label htmlFor="user-consent-checked" className="text-[10px] text-zinc-300 font-medium select-none cursor-pointer leading-tight">
-                          <span className="font-bold text-amber-400 block mb-0.5 uppercase tracking-wide text-[9px]">GDPR Biometric Consent Check</span>
-                          I agree to capture my facial landmarks for real-time identity matching. Secure mathematical vectors are compared and destroyed post-signature.
+                          <span className="font-bold text-amber-400 block mb-0.5 uppercase tracking-wide text-[9px]">GDPR FaceNet Biometric Consent Check</span>
+                          I agree to capture my facial landmarks via FaceNet neural embeddings for real-time identity matching. Secure mathematical vectors are compared and destroyed post-signature.
                         </label>
                       </div>
 
@@ -2870,7 +3068,7 @@ export default function StudentPortal({
                         }`}
                       >
                         <Camera className="h-4.5 w-4.5" />
-                        <span>Initialize Facial Scan</span>
+                        <span>Initialize FaceNet Facial Scan</span>
                       </button>
                     </div>
 
@@ -2932,6 +3130,81 @@ export default function StudentPortal({
                                   ? 'border-cyan-500 shadow-[0_0_15px_rgba(6,182,212,0.3)]'
                                   : 'border-slate-500 shadow-none'
                             }`}>
+                              {/* Biometric Verification overlay & Progress bar */}
+                              <AnimatePresence>
+                                {isVerifying && (
+                                  <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="absolute inset-0 bg-slate-950/80 backdrop-blur-[2px] z-20 flex flex-col items-center justify-center p-2.5 text-center font-sans"
+                                  >
+                                    {/* Scan line laser animation */}
+                                    <motion.div
+                                      animate={{ y: [-55, 55, -55] }}
+                                      transition={{ repeat: Infinity, duration: 1.8, ease: "linear" }}
+                                      className={`absolute left-0 right-0 h-1 z-10 pointer-events-none opacity-90 ${
+                                        cameraFilter === 'night_vision'
+                                          ? 'bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,1)]'
+                                          : cameraFilter === 'biometric_scanner'
+                                            ? 'bg-cyan-400 shadow-[0_0_12px_rgba(34,211,238,1)]'
+                                            : 'bg-blue-400 shadow-[0_0_12px_rgba(59,130,246,1)]'
+                                      }`}
+                                    />
+
+                                    {/* Pulsing Concentric rings */}
+                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                      <div className={`w-28 h-28 rounded-full border border-dashed animate-spin ${
+                                        cameraFilter === 'night_vision' ? 'border-emerald-500/20' : cameraFilter === 'biometric_scanner' ? 'border-cyan-500/20' : 'border-blue-500/20'
+                                      }`} style={{ animationDuration: '6s' }} />
+                                      <div className={`w-20 h-20 rounded-full border border-double animate-ping opacity-25 ${
+                                        cameraFilter === 'night_vision' ? 'border-emerald-400' : cameraFilter === 'biometric_scanner' ? 'border-cyan-400' : 'border-blue-400'
+                                      }`} style={{ animationDuration: '2.5s' }} />
+                                    </div>
+
+                                    <div className="relative z-10 flex flex-col items-center space-y-1.5">
+                                      {/* Loading / Scanning indicator icon */}
+                                      <Loader2 className={`h-4 w-4 animate-spin ${
+                                        cameraFilter === 'night_vision' ? 'text-emerald-400' : cameraFilter === 'biometric_scanner' ? 'text-cyan-400' : 'text-blue-400'
+                                      }`} />
+
+                                      {/* Dynamic Title / Action */}
+                                      <span className={`text-[8px] font-black font-mono tracking-widest uppercase ${
+                                        cameraFilter === 'night_vision' ? 'text-emerald-400' : cameraFilter === 'biometric_scanner' ? 'text-cyan-400' : 'text-blue-400'
+                                      }`}>
+                                        {liveAttendanceStatus.includes('STAGE 1') ? 'ALIGNING FACE' :
+                                         liveAttendanceStatus.includes('STAGE 2') ? 'LUMINANCE OK' :
+                                         liveAttendanceStatus.includes('STAGE 3') ? 'LIVENESS PASS' :
+                                         liveAttendanceStatus.includes('STAGE 4') ? 'EXTRACTING' :
+                                         'COOU MATCHING'}
+                                      </span>
+
+                                      {/* Visual Progress Bar */}
+                                      <div className="w-24 bg-slate-900/90 h-1.5 rounded-full overflow-hidden border border-white/10 shadow-inner relative flex items-center">
+                                        <div 
+                                          className={`h-full rounded-full transition-all duration-300 ease-out ${
+                                            cameraFilter === 'night_vision' ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]' :
+                                            cameraFilter === 'biometric_scanner' ? 'bg-cyan-400 shadow-[0_0_8px_#22d3ee]' :
+                                            'bg-blue-400 shadow-[0_0_8px_#3b82f6]'
+                                          }`}
+                                          style={{ width: `${getVerificationProgress()}%` }}
+                                        />
+                                      </div>
+
+                                      {/* Progress Numeric Percentage */}
+                                      <span className="text-[10px] font-extrabold text-white tracking-wider">
+                                        {getVerificationProgress()}%
+                                      </span>
+
+                                      {/* Stage detail status */}
+                                      <span className="text-[6.5px] text-zinc-400 font-mono tracking-widest uppercase block max-w-[125px] truncate">
+                                        {liveAttendanceStatus}
+                                      </span>
+                                    </div>
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+
                               {/* Camera hidden capture canvas element */}
                               <canvas ref={canvasRef} className="hidden" />
 
@@ -3810,7 +4083,7 @@ export default function StudentPortal({
             <div>
               <h3 className="text-sm font-black text-blue-950 uppercase tracking-wider flex items-center space-x-2">
                 <School className="h-4 w-4 text-emerald-600" />
-                <span>COOU Student Facial Biometric Registry Directory</span>
+                <span>COOU Student FaceNet Biometric Registry Directory</span>
               </h3>
               <p className="text-xs text-slate-400 mt-1">
                 Authorized Course Representative Panel to manage enrolled student identities, verify biometric landmarks, and purge inactive registration credentials.
@@ -4069,7 +4342,7 @@ export default function StudentPortal({
                       <label className="flex items-center justify-between cursor-pointer">
                         <span className="text-xs font-semibold text-slate-850 flex items-center space-x-1.5">
                           <Camera className="h-3.5 w-3.5 text-blue-900" />
-                          <span>Facial Recognition Enrolled</span>
+                          <span>FaceNet Biometric Enrolled</span>
                         </span>
                         <input 
                           type="checkbox"
