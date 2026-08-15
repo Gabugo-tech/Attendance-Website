@@ -3540,7 +3540,7 @@ export default function StudentPortal({
                           {/* Real-time Rigid Verification HUD Panel */}
                           {(() => {
                             return (
-                              <div className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-left space-y-2 mt-1 w-full max-w-[176px] font-sans shadow-lg">
+                              <div className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-left space-y-2 mt-1 w-full max-w-[200px] font-sans shadow-lg">
                                 <div className="flex items-center justify-between border-b border-white/5 pb-1">
                                   <span className="text-[7.5px] font-black text-rose-400 tracking-wider font-mono">RIGID BIOMETRIC HUD</span>
                                   <span className="animate-pulse h-1 w-1 bg-rose-500 rounded-full" />
@@ -3636,7 +3636,7 @@ export default function StudentPortal({
                           })()}
 
                           {/* Toggle Switch for Recent Scans Log */}
-                          <div className="flex items-center justify-between w-full max-w-[176px] bg-slate-900/80 border border-slate-700/50 rounded-lg px-2.5 py-1.5 mt-1">
+                          <div className="flex items-center justify-between w-full max-w-[200px] bg-slate-900/80 border border-slate-700/50 rounded-lg px-2.5 py-1.5 mt-1">
                             <span className="text-[8px] font-mono font-bold text-zinc-400 uppercase tracking-wider">Show Log</span>
                             <button
                               type="button"
@@ -3655,7 +3655,7 @@ export default function StudentPortal({
                           </div>
 
                           {/* Toggle Switch for TTS Voice Confirmation */}
-                          <div className="flex items-center justify-between w-full max-w-[176px] bg-slate-900/80 border border-slate-700/50 rounded-lg px-2.5 py-1.5 mt-1">
+                          <div className="flex items-center justify-between w-full max-w-[200px] bg-slate-900/80 border border-slate-700/50 rounded-lg px-2.5 py-1.5 mt-1">
                             <span className="text-[8px] font-mono font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1">
                               {enableVoiceConfirmation ? <Volume2 className="h-2.5 w-2.5 text-amber-500" /> : <VolumeX className="h-2.5 w-2.5 text-zinc-500" />}
                               <span>TTS Voice</span>
@@ -3697,7 +3697,7 @@ export default function StudentPortal({
 
                           {/* RECENT SCANS HUD JOURNAL LOG PANEL */}
                           {showRecentScansLog && (
-                            <div className="w-full max-w-[176px] bg-slate-95.0/95 bg-slate-950/90 border border-slate-800 rounded-lg p-2.5 space-y-2 font-mono flex flex-col text-left shadow-2xl">
+                            <div className="w-full max-w-[200px] bg-slate-950/90 border border-slate-800 rounded-lg p-2.5 space-y-2 font-mono flex flex-col text-left shadow-2xl">
                               <span className="text-[8px] font-black text-cyan-400 tracking-widest uppercase border-b border-white/5 pb-1 flex items-center justify-between">
                                 <span>Scans Journal</span>
                                 <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />

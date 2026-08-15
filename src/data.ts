@@ -5,165 +5,8 @@
 
 import { Student, Course, AttendanceRecord, AttendanceSession } from './types';
 
-// Pre-populated Courses at COOU
-export const SEED_COURSES: Course[] = [
-  {
-    code: "CSC 411",
-    title: "Compiler Construction & Formal Languages",
-    department: "Computer Science",
-    lecturerName: "Dr. Charles O. Adesina",
-    semester: "First Semester",
-    level: "400 Level",
-    creditUnits: 3,
-    academicSession: "2025/2026",
-    status: "Compulsory",
-    description: "Lexical analysis, syntax trees, grammars, parsing algorithms, and code generation.",
-    dateAdded: "12 Oct 2025"
-  },
-  {
-    code: "CSC 421",
-    title: "Distributed Computing & Cloud Architectures",
-    department: "Computer Science",
-    lecturerName: "Engr. Prof. Edwin S. Obiorah",
-    semester: "Second Semester",
-    level: "400 Level",
-    creditUnits: 3,
-    academicSession: "2025/2026",
-    status: "Compulsory",
-    description: "Distributed consensus, concurrency, microservices, and serverless compute paradigms.",
-    dateAdded: "15 Jan 2026"
-  },
-  {
-    code: "GST 112",
-    title: "Philosophy and Human Existence",
-    department: "General Studies",
-    lecturerName: "Dr. Charles O. Adesina",
-    semester: "Second Semester",
-    level: "100 Level",
-    creditUnits: 2,
-    academicSession: "2025/2026",
-    status: "Compulsory",
-    description: "Fundamental philosophical logic, human inquiry, reasoning, and institutional ethics.",
-    dateAdded: "04 Feb 2026"
-  },
-  {
-    code: "MTH 102",
-    title: "Elementary Mathematics II",
-    department: "Mathematics",
-    lecturerName: "Prof. Augustine U. Nwosu",
-    semester: "Second Semester",
-    level: "100 Level",
-    creditUnits: 3,
-    academicSession: "2025/2026",
-    status: "Compulsory",
-    description: "Calculus integration techniques, differential equations, and coordinate geometry.",
-    dateAdded: "04 Feb 2026"
-  },
-  {
-    code: "COS 102",
-    title: "Computer Science II",
-    department: "Computer Science",
-    lecturerName: "Dr. Mrs. Grace N. Okafor",
-    semester: "Second Semester",
-    level: "100 Level",
-    creditUnits: 3,
-    academicSession: "2025/2026",
-    status: "Compulsory",
-    description: "Structured problem solving, pointer mechanics, dynamic memory, and algorithms in C/C++.",
-    dateAdded: "04 Feb 2026"
-  },
-  {
-    code: "PHY 102",
-    title: "General Physics II",
-    department: "Physics",
-    lecturerName: "Engr. Prof. Edwin S. Obiorah",
-    semester: "Second Semester",
-    level: "100 Level",
-    creditUnits: 3,
-    academicSession: "2025/2026",
-    status: "Required",
-    description: "Electromagnetism, capacitance, Gauss's law, circuit networks, and optics.",
-    dateAdded: "04 Feb 2026"
-  },
-  {
-    code: "PHY 108",
-    title: "General Physics Laboratory II",
-    department: "Physics",
-    lecturerName: "Mrs. Chinwe E. Anyaegbunam",
-    semester: "Second Semester",
-    level: "100 Level",
-    creditUnits: 1,
-    academicSession: "2025/2026",
-    status: "Required",
-    description: "Hands-on empirical measurement experiments in electricity, magnetism, and optics.",
-    dateAdded: "04 Feb 2026"
-  },
-  {
-    code: "COOU-CSC 104",
-    title: "Introduction to Computing Science",
-    department: "Computer Science",
-    lecturerName: "Dr. Charles O. Adesina",
-    semester: "First Semester",
-    level: "100 Level",
-    creditUnits: 2,
-    academicSession: "2025/2026",
-    status: "Compulsory",
-    description: "Foundational computer architecture, von Neumann models, logic gates, and software systems.",
-    dateAdded: "10 Oct 2025"
-  },
-  {
-    code: "COOU-CSC 128",
-    title: "Fundamentals of Information Systems",
-    department: "Computer Science",
-    lecturerName: "Dr. Mrs. Grace N. Okafor",
-    semester: "First Semester",
-    level: "100 Level",
-    creditUnits: 2,
-    academicSession: "2025/2026",
-    status: "Required",
-    description: "Organizational data processing systems, relational structures, and enterprise IT flows.",
-    dateAdded: "10 Oct 2025"
-  },
-  {
-    code: "COOU-COS 192",
-    title: "Computer Workshop & Practicals",
-    department: "Computer Science",
-    lecturerName: "Barr. Dr. Anthony C. Ojukwu",
-    semester: "Second Semester",
-    level: "100 Level",
-    creditUnits: 2,
-    academicSession: "2025/2026",
-    status: "Compulsory",
-    description: "Hardware assembly, motherboard diagnostics, OS installation, and basic network cabling.",
-    dateAdded: "04 Feb 2026"
-  },
-  {
-    code: "COOU-PHY 106",
-    title: "Basic Thermal and Modern Physics",
-    department: "Physics",
-    lecturerName: "Engr. Prof. Edwin S. Obiorah",
-    semester: "First Semester",
-    level: "100 Level",
-    creditUnits: 3,
-    academicSession: "2025/2026",
-    status: "Required",
-    description: "Thermodynamics laws, kinetic molecular theory, entropy, and quantum radiation foundations.",
-    dateAdded: "10 Oct 2025"
-  },
-  {
-    code: "COOU-GEY 116",
-    title: "Introduction to Geology II",
-    department: "Geology",
-    lecturerName: "Dr. Charles O. Adesina",
-    semester: "Second Semester",
-    level: "100 Level",
-    creditUnits: 2,
-    academicSession: "2025/2026",
-    status: "Elective",
-    description: "Stratigraphy, sedimentary basin analysis, mineral crystallography, and Nigerian geomorphology.",
-    dateAdded: "04 Feb 2026"
-  }
-];
+// Pre-populated Courses at COOU (Empty roster by default - courses registered via admin dashboard)
+export const SEED_COURSES: Course[] = [];
 
 // Pre-populated Students at COOU (Empty roster by default - students register via biometric registration portal)
 export const SEED_STUDENTS: Student[] = [];
@@ -172,6 +15,10 @@ export const SEED_STUDENTS: Student[] = [];
 export function generateSeedSessionsAndRecords(): { sessions: AttendanceSession[], records: AttendanceRecord[] } {
   const sessions: AttendanceSession[] = [];
   const records: AttendanceRecord[] = [];
+
+  if (SEED_COURSES.length === 0) {
+    return { sessions, records };
+  }
 
   const now = new Date();
 

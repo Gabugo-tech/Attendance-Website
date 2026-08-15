@@ -267,6 +267,23 @@ export async function deleteCourseFromDb(courseCode: string): Promise<void> {
   }
 }
 
+export async function deleteAllCoursesFromDb(): Promise<void> {
+  localStorage.setItem('coou_courses', JSON.stringify([]));
+
+  if (isMockFirebase || !db || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+    return;
+  }
+  try {
+    const { getDocs, collection, deleteDoc } = await import('firebase/firestore');
+    const snap = await getDocs(collection(db, 'courses'));
+    const deletePromises = snap.docs.map(docSnap => deleteDoc(docSnap.ref));
+    await Promise.all(deletePromises);
+    console.log(`[Sync Engine] Successfully purged all registered courses from Cloud Firestore.`);
+  } catch (err) {
+    console.error('[Sync Engine] Failed to delete all courses from cloud', err);
+  }
+}
+
 export async function getSessionsFromDb(): Promise<AttendanceSession[]> {
   const raw = localStorage.getItem('coou_sessions');
   const localCache = raw ? JSON.parse(raw) : [];

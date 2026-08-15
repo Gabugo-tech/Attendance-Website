@@ -17,6 +17,7 @@ interface AdminDashboardProps {
   onRegisterCourse?: (course: Course) => void;
   onUpdateCourse?: (course: Course) => void;
   onDeleteCourse?: (courseCode: string) => void;
+  onDeleteAllCourses?: () => void;
   lecturers: Lecturer[];
   onRegisterLecturer: (lecturer: Lecturer) => void;
   onDeleteLecturer: (id: string) => void;
@@ -31,6 +32,7 @@ export default function AdminDashboard({
   onRegisterCourse,
   onUpdateCourse,
   onDeleteCourse,
+  onDeleteAllCourses,
   lecturers,
   onRegisterLecturer,
   onDeleteLecturer,
@@ -68,6 +70,7 @@ export default function AdminDashboard({
   // Edit Course Modal State
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [deletingCourse, setDeletingCourse] = useState<Course | null>(null);
+  const [isDeletingAllCourses, setIsDeletingAllCourses] = useState<boolean>(false);
 
   // ================= LECTURER FORM STATES =================
   const [lecName, setLecName] = useState('');
@@ -331,10 +334,10 @@ export default function AdminDashboard({
       </AnimatePresence>
 
       {/* PRIMARY NAVIGATION TAB BAR */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-1.5 flex shadow-sm gap-1.5 flex-wrap sm:flex-nowrap">
+      <div className="bg-white rounded-2xl border border-slate-200 p-1.5 grid grid-cols-2 lg:flex shadow-sm gap-1.5 sm:gap-2">
         <button
           onClick={() => { setActiveTab('courses'); clearMessages(); }}
-          className={`flex-1 py-2.5 px-3 text-xs font-bold uppercase tracking-wider rounded-xl flex items-center justify-center space-x-2 transition min-h-[40px] ${
+          className={`flex-1 py-2.5 px-2.5 sm:px-3 text-[11px] sm:text-xs font-bold uppercase tracking-wider rounded-xl flex items-center justify-center space-x-1.5 sm:space-x-2 transition min-h-[42px] ${
             activeTab === 'courses' 
               ? 'bg-blue-900 text-white shadow-md' 
               : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
@@ -342,12 +345,12 @@ export default function AdminDashboard({
           id="admin-tab-courses"
         >
           <BookOpen className="h-4 w-4 text-amber-400 shrink-0" />
-          <span>Semester Course Offerings ({courses.length})</span>
+          <span className="truncate">Courses ({courses.length})</span>
         </button>
 
         <button
           onClick={() => { setActiveTab('lecturers'); clearMessages(); }}
-          className={`flex-1 py-2.5 px-3 text-xs font-bold uppercase tracking-wider rounded-xl flex items-center justify-center space-x-2 transition min-h-[40px] ${
+          className={`flex-1 py-2.5 px-2.5 sm:px-3 text-[11px] sm:text-xs font-bold uppercase tracking-wider rounded-xl flex items-center justify-center space-x-1.5 sm:space-x-2 transition min-h-[42px] ${
             activeTab === 'lecturers' 
               ? 'bg-blue-900 text-white shadow-md' 
               : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
@@ -355,12 +358,12 @@ export default function AdminDashboard({
           id="admin-tab-lecturers"
         >
           <Users className="h-4 w-4 text-cyan-300 shrink-0" />
-          <span>Enroll Academic Staff ({lecturers.length})</span>
+          <span className="truncate">Staff ({lecturers.length})</span>
         </button>
         
         <button
           onClick={() => { setActiveTab('reps'); clearMessages(); }}
-          className={`flex-1 py-2.5 px-3 text-xs font-bold uppercase tracking-wider rounded-xl flex items-center justify-center space-x-2 transition min-h-[40px] ${
+          className={`flex-1 py-2.5 px-2.5 sm:px-3 text-[11px] sm:text-xs font-bold uppercase tracking-wider rounded-xl flex items-center justify-center space-x-1.5 sm:space-x-2 transition min-h-[42px] ${
             activeTab === 'reps' 
               ? 'bg-amber-500 text-slate-950 shadow-md font-black' 
               : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
@@ -368,12 +371,12 @@ export default function AdminDashboard({
           id="admin-tab-reps"
         >
           <UserCheck className="h-4 w-4 shrink-0" />
-          <span>Course Representatives ({courseReps.length})</span>
+          <span className="truncate">Course Reps ({courseReps.length})</span>
         </button>
 
         <button
           onClick={() => { setActiveTab('audit_logs'); clearMessages(); }}
-          className={`flex-1 py-2.5 px-3 text-xs font-bold uppercase tracking-wider rounded-xl flex items-center justify-center space-x-2 transition min-h-[40px] ${
+          className={`flex-1 py-2.5 px-2.5 sm:px-3 text-[11px] sm:text-xs font-bold uppercase tracking-wider rounded-xl flex items-center justify-center space-x-1.5 sm:space-x-2 transition min-h-[42px] ${
             activeTab === 'audit_logs' 
               ? 'bg-indigo-950 text-white shadow-md border border-indigo-900' 
               : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
@@ -381,7 +384,7 @@ export default function AdminDashboard({
           id="admin-tab-audit-logs"
         >
           <ShieldCheck className="h-4 w-4 text-indigo-400 shrink-0" />
-          <span>Biometric Audit Logs ({auditLogs.length})</span>
+          <span className="truncate">Audit Logs ({auditLogs.length})</span>
         </button>
       </div>
 
@@ -650,6 +653,17 @@ export default function AdminDashboard({
                     <span className="text-[10px] font-mono bg-blue-100/70 text-blue-900 px-2.5 py-1 rounded-lg font-black">
                       {filteredCourses.length} of {courses.length} Courses
                     </span>
+                    {courses.length > 0 && onDeleteAllCourses && (
+                      <button
+                        type="button"
+                        onClick={() => setIsDeletingAllCourses(true)}
+                        className="text-[10px] font-bold uppercase tracking-wider text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2.5 py-1 rounded-lg transition flex items-center space-x-1"
+                        id="purge-all-courses-btn"
+                      >
+                        <Trash2 className="h-3 w-3 text-rose-600" />
+                        <span>Delete All</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -1521,6 +1535,68 @@ export default function AdminDashboard({
                   className="flex-1 rounded-xl bg-rose-600 hover:bg-rose-700 text-xs font-black uppercase text-white py-2.5 transition shadow"
                 >
                   Confirm Expunge
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ========================================================================= */}
+      {/* DELETE ALL COURSES CONFIRMATION MODAL */}
+      {/* ========================================================================= */}
+      <AnimatePresence>
+        {isDeletingAllCourses && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsDeletingAllCourses(false)}
+              className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.95, y: 15, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.95, y: 15, opacity: 0 }}
+              className="relative w-full max-w-md overflow-hidden rounded-2xl border border-rose-500 bg-white p-6 shadow-2xl z-10 space-y-4"
+              id="delete-all-courses-warning-dialog"
+            >
+              <div className="flex items-center space-x-3 text-rose-650 border-b border-slate-100 pb-3">
+                <div className="h-10 w-10 rounded-full bg-rose-100 flex items-center justify-center text-rose-650 shrink-0">
+                  <Trash2 className="h-5 w-5 text-rose-600" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-extrabold uppercase tracking-widest text-rose-900 leading-tight">Delete All Registered Courses?</h4>
+                  <span className="text-[10px] font-mono uppercase text-rose-600 font-bold">ALL COURSES PURGE ACTION</span>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Are you sure you want to permanently delete all <strong className="text-slate-950">{courses.length} registered course(s)</strong> from the system database? This action will expunge all course catalog entries.
+              </p>
+
+              <div className="flex space-x-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsDeletingAllCourses(false)}
+                  className="flex-1 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-black uppercase text-slate-700 py-2.5 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onDeleteAllCourses) {
+                      onDeleteAllCourses();
+                      setSuccessMessage('All registered courses have been successfully deleted.');
+                    }
+                    setIsDeletingAllCourses(false);
+                  }}
+                  id="confirm-purge-all-courses-btn"
+                  className="flex-1 rounded-xl bg-rose-600 hover:bg-rose-700 text-xs font-black uppercase text-white py-2.5 transition shadow"
+                >
+                  Confirm Delete All
                 </button>
               </div>
             </motion.div>

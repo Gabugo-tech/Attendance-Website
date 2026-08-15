@@ -24,6 +24,7 @@ import {
   getCoursesFromDb, 
   saveCourseToDb, 
   deleteCourseFromDb,
+  deleteAllCoursesFromDb,
   getSessionsFromDb, 
   saveSessionToDb, 
   getRecordsFromDb, 
@@ -131,20 +132,12 @@ export default function App() {
           localStorage.setItem('coou_students', JSON.stringify(fbStudents));
         }
 
-        if (fbCourses.length === 0) {
-          // Dynamic database seeding for course catalog
-          const seedData = generateSeedSessionsAndRecords();
-          
-          for (const c of SEED_COURSES) {
-            await saveCourseToDb(c);
-          }
-          for (const s of seedData.sessions) {
-            await saveSessionToDb(s);
-          }
-
-          fbCourses = SEED_COURSES;
-          fbSessions = seedData.sessions;
+        // Purge all legacy and registered courses as requested
+        if (fbCourses.length > 0) {
+          await deleteAllCoursesFromDb();
+          fbCourses = [];
         }
+        localStorage.setItem('coou_courses', JSON.stringify([]));
 
         setStudents(fbStudents);
         setCourses(fbCourses);
@@ -417,6 +410,15 @@ export default function App() {
     }
   };
 
+  const handleDeleteAllCourses = async () => {
+    setCourses([]);
+    try {
+      await deleteAllCoursesFromDb();
+    } catch (e) {
+      console.error("Failed to delete all courses from database", e);
+    }
+  };
+
   // Course Rep enrollment controllers
   const handleRegisterCourseRep = (newRep: CourseRep) => {
     const updated = [...courseReps, newRep];
@@ -575,6 +577,7 @@ export default function App() {
                   onRegisterCourse={handleRegisterCourse}
                   onUpdateCourse={handleUpdateCourse}
                   onDeleteCourse={handleDeleteCourse}
+                  onDeleteAllCourses={handleDeleteAllCourses}
                   lecturers={lecturers}
                   onRegisterLecturer={handleRegisterLecturer}
                   onDeleteLecturer={handleDeleteLecturer}
