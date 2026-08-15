@@ -199,11 +199,7 @@ export default function StudentPortal({
     status: 'SUCCESS' | 'MISMATCH' | 'FAILED';
     errorMessage?: string;
     scanType: string;
-  }>>([
-    { id: '1', timestamp: new Date(Date.now() - 120000).toISOString(), studentName: 'Chidi Okafor', status: 'SUCCESS', scanType: 'FACIAL' },
-    { id: '2', timestamp: new Date(Date.now() - 280000).toISOString(), studentName: 'Unknown Candidate', status: 'MISMATCH', errorMessage: 'Manual profile mismatch', scanType: 'FACIAL' },
-    { id: '3', timestamp: new Date(Date.now() - 450000).toISOString(), studentName: 'Nkemdilim Udene', status: 'SUCCESS', scanType: 'FACIAL' }
-  ]);
+  }>>([]);
 
   const [showRecentScansLog, setShowRecentScansLog] = useState<boolean>(() => {
     try {
@@ -2209,7 +2205,7 @@ export default function StudentPortal({
                     id="reg-fullname-field"
                     value={regName}
                     onChange={(e) => setRegName(e.target.value)}
-                    placeholder="e.g. Anyigor Chinedu Samuel"
+                    placeholder="e.g. Chukwuebuka Daniel Obi"
                     className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:border-blue-900 focus:outline-none"
                   />
                 </div>
@@ -3707,32 +3703,38 @@ export default function StudentPortal({
                                 <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
                               </span>
                               <div className="space-y-1.5 max-h-[110px] overflow-y-auto pr-0.5">
-                                {recentScans.map((log) => {
-                                  const timeStr = new Date(log.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                                  return (
-                                    <div key={log.id} className="text-[8px] flex flex-col border-b border-white/5 pb-1.5 last:border-0 last:pb-0">
-                                      <div className="flex items-center justify-between font-semibold">
-                                        <span className="text-zinc-350 truncate max-w-[95px]">{log.studentName}</span>
-                                        <span className={`text-[7px] px-1 rounded-sm uppercase font-extrabold ${
-                                          log.status === 'SUCCESS' 
-                                            ? 'bg-green-500/10 text-green-400 border border-green-500/20' 
-                                            : log.status === 'MISMATCH' 
-                                              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' 
-                                              : 'bg-red-500/10 text-red-400 border border-red-500/20'
-                                        }`}>{log.status}</span>
+                                {recentScans.length === 0 ? (
+                                  <div className="text-[8px] text-zinc-500 italic py-2 text-center">
+                                    No scans logged yet
+                                  </div>
+                                ) : (
+                                  recentScans.map((log) => {
+                                    const timeStr = new Date(log.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                                    return (
+                                      <div key={log.id} className="text-[8px] flex flex-col border-b border-white/5 pb-1.5 last:border-0 last:pb-0">
+                                        <div className="flex items-center justify-between font-semibold">
+                                          <span className="text-zinc-350 truncate max-w-[95px]">{log.studentName}</span>
+                                          <span className={`text-[7px] px-1 rounded-sm uppercase font-extrabold ${
+                                            log.status === 'SUCCESS' 
+                                              ? 'bg-green-500/10 text-green-400 border border-green-500/20' 
+                                              : log.status === 'MISMATCH' 
+                                                ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' 
+                                                : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                                          }`}>{log.status}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between text-[7px] text-zinc-500 mt-0.5 font-bold">
+                                          <span>{log.scanType ? `${log.scanType} SCAN` : 'FACIAL SCAN'}</span>
+                                          <span>{timeStr}</span>
+                                        </div>
+                                        {log.errorMessage && (
+                                          <span className="text-[7px] text-red-400/90 mt-0.5 uppercase tracking-wide truncate">
+                                            &gt;&gt; {log.errorMessage}
+                                          </span>
+                                        )}
                                       </div>
-                                      <div className="flex items-center justify-between text-[7px] text-zinc-500 mt-0.5 font-bold">
-                                        <span>{log.scanType ? `${log.scanType} SCAN` : 'FACIAL SCAN'}</span>
-                                        <span>{timeStr}</span>
-                                      </div>
-                                      {log.errorMessage && (
-                                        <span className="text-[7px] text-red-400/90 mt-0.5 uppercase tracking-wide truncate">
-                                          &gt;&gt; {log.errorMessage}
-                                        </span>
-                                      )}
-                                    </div>
-                                  );
-                                })}
+                                    );
+                                  })
+                                )}
                               </div>
                             </div>
                           )}

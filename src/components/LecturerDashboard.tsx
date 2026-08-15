@@ -36,6 +36,7 @@ export default function LecturerDashboard({
   const [selectedCourseCode, setSelectedCourseCode] = useState<string>('');
   const [selectedCampus, setSelectedCampus] = useState<string>(COOU_CAMPUSES[0].name);
   const [customRadius, setCustomRadius] = useState<number>(500);
+  const [selectedViewSessionId, setSelectedViewSessionId] = useState<string>('');
 
   // Active Session details
   const currentActiveSession = activeSessions.find(s => s.isActive);
@@ -63,6 +64,15 @@ export default function LecturerDashboard({
   const [isSendingAlerts, setIsSendingAlerts] = useState<boolean>(false);
   const [alertSuccessMessage, setAlertSuccessMessage] = useState<string | null>(null);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
+
+  // Keep view session synchronized with active or latest session
+  useEffect(() => {
+    if (currentActiveSession) {
+      setSelectedViewSessionId(currentActiveSession.id);
+    } else if (activeSessions.length > 0 && !selectedViewSessionId) {
+      setSelectedViewSessionId(activeSessions[activeSessions.length - 1].id);
+    }
+  }, [currentActiveSession, activeSessions, selectedViewSessionId]);
 
   useEffect(() => {
     if (currentActiveSession) {
@@ -107,38 +117,58 @@ export default function LecturerDashboard({
     };
 
     onStartSession(newSession);
+    setSelectedViewSessionId(newSession.id);
     setOtpProgress(30);
   };
 
-  // Filter records & students to calculate roster statistics
-  const currentSessionRecords = records.filter(
-    r => r.sessionId === (currentActiveSession?.id || 'none')
+  // Determine current active or selected session for roster display
+  const displaySessionId = selectedViewSessionId || currentActiveSession?.id || (activeSessions.length > 0 ? activeSessions[activeSessions.length - 1].id : null);
+  const selectedSession = activeSessions.find(s => s.id === displaySessionId) || currentActiveSession || activeSessions[0];
+  const displayCourse = courses.find(c => c.code === selectedSession?.courseCode);
+
+  // Gather records for the currently selected session (matching by sessionId or course+date fallback)
+  const sessionRecords = records.filter(r => 
+    r.sessionId === displaySessionId || 
+    (selectedSession && r.courseCode === selectedSession.courseCode && r.date === selectedSession.date)
   );
 
+  // Robust student presence matching
+  const isStudentPresent = (student: Student, recs: AttendanceRecord[]) => {
+    return recs.some(r => {
+      const isStatusPresent = !r.status || r.status.toLowerCase() === 'present';
+      const matchId = r.studentId === student.id;
+      const matchReg = !!(r.regNo && student.regNo && r.regNo.trim().toLowerCase() === student.regNo.trim().toLowerCase());
+      const matchName = !!(r.studentName && student.name && r.studentName.trim().toLowerCase() === student.name.trim().toLowerCase());
+      return isStatusPresent && (matchId || matchReg || matchName);
+    });
+  };
+
+  const getStudentSessionRecord = (student: Student, recs: AttendanceRecord[]) => {
+    return recs.find(r => {
+      const matchId = r.studentId === student.id;
+      const matchReg = !!(r.regNo && student.regNo && r.regNo.trim().toLowerCase() === student.regNo.trim().toLowerCase());
+      const matchName = !!(r.studentName && student.name && r.studentName.trim().toLowerCase() === student.name.trim().toLowerCase());
+      return matchId || matchReg || matchName;
+    });
+  };
+
   const totalRegisteredStudents = students.length;
-  const presentCount = currentSessionRecords.length;
-  const absentCount = totalRegisteredStudents - presentCount;
+  const presentCount = students.filter(s => isStudentPresent(s, sessionRecords)).length;
+  const absentCount = Math.max(0, totalRegisteredStudents - presentCount);
   const attendancePercentage = totalRegisteredStudents > 0 
     ? Math.round((presentCount / totalRegisteredStudents) * 100) 
     : 0;
 
-  // Prepare overall table data merging student profiles & check-in records for current selected session (active or latest session)
-  const displaySessionId = currentActiveSession?.id || (activeSessions.length > 0 ? activeSessions[0].id : null);
-  const selectedSession = activeSessions.find(s => s.id === displaySessionId);
-  const displayCourse = courses.find(c => c.code === selectedSession?.courseCode);
-
-  const sessionRecords = records.filter(r => r.sessionId === displaySessionId);
-
   const handleToggleAttendance = async (student: Student, currentStatus: 'PRESENT' | 'ABSENT', existingRecordId?: string) => {
-    const activeSession = activeSessions.find(s => s.id === displaySessionId) || activeSessions[0];
+    const activeSession = selectedSession || currentActiveSession || activeSessions[0];
     if (!activeSession) {
-      setDashboardError("No active session found. Please initialize an Attendance Gate first.");
+      setDashboardError("No lecture session found. Please initialize an Attendance Gate first.");
       setTimeout(() => setDashboardError(null), 4000);
       return;
     }
 
     if (currentStatus === 'PRESENT') {
-      const rec = records.find(r => r.studentId === student.id && r.sessionId === activeSession.id);
+      const rec = getStudentSessionRecord(student, sessionRecords);
       if (rec && onDeleteAttendance) {
         onDeleteAttendance(rec.id);
       } else if (existingRecordId && onDeleteAttendance) {
@@ -182,7 +212,7 @@ export default function LecturerDashboard({
 
   // Group stats for bento visual graphs
   const deptStats = students.reduce((acc, student) => {
-    const isPresent = sessionRecords.some(r => r.studentId === student.id);
+    const isPresent = isStudentPresent(student, sessionRecords);
     if (!acc[student.department]) {
       acc[student.department] = { total: 0, present: 0 };
     }
@@ -193,14 +223,15 @@ export default function LecturerDashboard({
 
   // Filter student rows for displaying roster grid
   const studentRows = students.map((student) => {
-    const record = sessionRecords.find(r => r.studentId === student.id);
+    const record = getStudentSessionRecord(student, sessionRecords);
+    const isPresent = isStudentPresent(student, sessionRecords);
     return {
       id: student.id,
       name: student.name,
       regNo: student.regNo,
       department: student.department,
-      status: record ? 'PRESENT' : 'ABSENT',
-      time: record ? new Date(record.timestamp).toLocaleTimeString() : '-- --',
+      status: isPresent ? 'PRESENT' : 'ABSENT',
+      time: record ? (record.time || new Date(record.timestamp).toLocaleTimeString()) : '-- --',
       method: record ? record.biometricType : '--',
       photo: student.photoUrl,
       snap: record?.authSnapshot,
@@ -254,13 +285,14 @@ export default function LecturerDashboard({
       // Construct clean list headers
       const headers = ['Student Name', 'Reg Number', 'Department', 'Status', 'Verified Clock-In', 'Validation Mode', 'Physical Distance (m)'];
       const rows = students.map((student) => {
-        const record = sessionRecords.find(r => r.studentId === student.id);
+        const record = getStudentSessionRecord(student, sessionRecords);
+        const isPresent = isStudentPresent(student, sessionRecords);
         return [
           student.name,
           student.regNo,
           student.department,
-          record ? 'PRESENT' : 'ABSENT',
-          record ? new Date(record.timestamp).toLocaleTimeString() : '--',
+          isPresent ? 'PRESENT' : 'ABSENT',
+          record ? (record.time || new Date(record.timestamp).toLocaleTimeString()) : '--',
           record ? record.biometricType.replace('_', ' ').toUpperCase() : '--',
           record?.locationInfo?.distanceMeters !== undefined ? `${record.locationInfo.distanceMeters}m` : '--'
         ];
@@ -299,22 +331,22 @@ export default function LecturerDashboard({
   const totalSessionsCount = courseSessionsList.length;
 
   const thresholdStudents = students.map(st => {
-    const isPresentInCurrent = sessionRecords.some(r => r.studentId === st.id);
-    const presentCountInCourse = records.filter(r => r.studentId === st.id && courseSessionsList.some(cs => cs.id === r.sessionId)).length;
+    const isPresentInCurrent = isStudentPresent(st, sessionRecords);
+    const studentCourseRecords = records.filter(r => 
+      (!r.status || r.status.toLowerCase() === 'present') &&
+      (r.studentId === st.id || (r.regNo && st.regNo && r.regNo.trim().toLowerCase() === st.regNo.trim().toLowerCase()) || (r.studentName && st.name && r.studentName.trim().toLowerCase() === st.name.trim().toLowerCase())) && 
+      (courseSessionsList.some(cs => cs.id === r.sessionId) || r.courseCode === currentCourseCodeVal)
+    );
     
-    // Use true session count if multiple recorded sessions exist, else default to semester benchmark (10 sessions)
-    const effectiveSessions = totalSessionsCount > 1 ? totalSessionsCount : 10;
-    const effectivePresent = totalSessionsCount > 1
-      ? presentCountInCourse 
-      : (isPresentInCurrent ? 8 : ((st.regNo.charCodeAt(st.regNo.length - 1) % 4) + 4)); // Realistic calculation
-    
-    const effectiveMissed = Math.max(0, effectiveSessions - effectivePresent);
+    const presentCountInCourse = Math.max(studentCourseRecords.length, isPresentInCurrent ? 1 : 0);
+    const effectiveSessions = Math.max(1, totalSessionsCount);
+    const effectiveMissed = Math.max(0, effectiveSessions - presentCountInCourse);
     const absenteeismRate = Math.round((effectiveMissed / effectiveSessions) * 100);
 
     return {
       student: st,
       total: effectiveSessions,
-      present: effectivePresent,
+      present: presentCountInCourse,
       missed: effectiveMissed,
       absenteeismRate,
       isPresentInCurrent
@@ -862,8 +894,8 @@ export default function LecturerDashboard({
         </AnimatePresence>
 
         {/* Dynamic filter line */}
-        <div className="grid gap-3 sm:grid-cols-4 mb-4" id="roster-query-filters-row">
-          <div className="relative">
+        <div className="grid gap-3 sm:grid-cols-5 mb-4" id="roster-query-filters-row">
+          <div className="relative sm:col-span-2">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-450" />
             <input
               type="text"
@@ -877,12 +909,16 @@ export default function LecturerDashboard({
 
           <div>
             <select
-              value={selectedDeptFilter}
-              id="roster-dept-filter"
-              onChange={(e) => setSelectedDeptFilter(e.target.value)}
+              value={displaySessionId || ''}
+              id="roster-session-filter"
+              onChange={(e) => setSelectedViewSessionId(e.target.value)}
               className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs text-slate-930 focus:border-blue-900 focus:outline-none font-bold"
             >
-              <option value="Computer Science">Computer Science Dept</option>
+              {activeSessions.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.courseCode} ({s.date} {s.isActive ? '• LIVE' : ''})
+                </option>
+              ))}
             </select>
           </div>
 
@@ -894,15 +930,20 @@ export default function LecturerDashboard({
               className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs text-slate-930 focus:border-blue-900 focus:outline-none"
             >
               <option value="All">All Attendance status</option>
-              <option value="PRESENT">Present</option>
-              <option value="ABSENT">Absent</option>
+              <option value="PRESENT">Present Only</option>
+              <option value="ABSENT">Absent Only</option>
             </select>
           </div>
 
-          <div className="flex items-center space-x-1.5 text-xs text-slate-600 bg-slate-50 p-2 rounded border border-slate-150">
-            <Filter className="h-3.5 w-3.5 text-blue-900" />
-            <span className="font-bold text-slate-900">{studentRows.length}</span>
-            <span>matched students</span>
+          <div className="flex items-center justify-between space-x-1.5 text-xs text-slate-600 bg-slate-50 p-2 rounded border border-slate-150">
+            <div className="flex items-center space-x-1.5">
+              <Filter className="h-3.5 w-3.5 text-blue-900" />
+              <span className="font-bold text-slate-900">{studentRows.length}</span>
+              <span>students</span>
+            </div>
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-900">
+              {presentCount} Present
+            </span>
           </div>
         </div>
 

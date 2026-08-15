@@ -435,7 +435,7 @@ Respond in strict JSON format:
   "match": boolean, // true if one candidate clearly matches with high confidence (e.g., >80% visual similarity) and no spoof is detected, false if no candidate matches or if spoofing is detected
   "studentId": string | null, // the matched candidate's ID or null
   "confidence": number, // confidence score between 0.0 and 1.0 (float)
-  "message": string // brief verification summary (e.g. "Identified Anyigor Chinedu Samuel with 94.5% FaceNet ocular landmark parity" or "Anti-Spoofing Shield: Screen presentation spoofing detected (bezel/reflection lines found)" or "Error: Student not recognized in system registry")
+  "message": string // brief verification summary (e.g. "Identified student with 94.5% FaceNet ocular landmark parity" or "Anti-Spoofing Shield: Screen presentation spoofing detected (bezel/reflection lines found)" or "Error: Student not recognized in system registry")
 }
 
 Return ONLY this JSON. Do not include markdown code block HTML formatting or outer descriptions.
@@ -489,8 +489,8 @@ Return ONLY this JSON. Do not include markdown code block HTML formatting or out
 
       // Normalize match status to boolean to prevent string comparison bugs and ensure a matched studentId is provided
       const isMatched = (parsed.match === true || parsed.match === "true" || parsed.match === "TRUE") && !!parsed.studentId;
-      const isCorrectStudentMatch = isMatched && parsed.studentId === posingStudentId;
-      const isDifferentStudentMatch = isMatched && parsed.studentId !== posingStudentId;
+      const isDifferentStudentMatch = isMatched && !!posingStudentId && parsed.studentId !== posingStudentId;
+      const isCorrectStudentMatch = isMatched && (posingStudentId ? parsed.studentId === posingStudentId : true);
 
       if (isDifferentStudentMatch) {
         // Strict Identity Mismatch Check: Student B is scanning for Student A. Direct block!

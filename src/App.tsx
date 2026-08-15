@@ -75,59 +75,15 @@ export default function App() {
     try {
       const stored = localStorage.getItem('coou_verification_audit_logs');
       if (stored) {
-        setAuditLogs(JSON.parse(stored));
+        const parsed: VerificationAuditLog[] = JSON.parse(stored);
+        const legacyMockNames = ['Chidi Okafor', 'Unknown Candidate', 'Nkemdilim Udene', 'Amadi Benson'];
+        const legacyLogIds = ['log-1', 'log-2', 'log-3', 'log-4', 'log-5'];
+        const cleaned = parsed.filter(l => !legacyMockNames.includes(l.studentName) && !legacyLogIds.includes(l.id));
+        setAuditLogs(cleaned);
+        localStorage.setItem('coou_verification_audit_logs', JSON.stringify(cleaned));
       } else {
-        const initialAuditLogs: VerificationAuditLog[] = [
-          {
-            id: 'log-1',
-            timestamp: new Date(Date.now() - 4 * 60000).toISOString(),
-            studentName: 'Chidi Okafor',
-            studentIdOrReg: '2021024001',
-            scanType: 'FACIAL',
-            status: 'SUCCESS',
-            challengeAction: 'Blink Check Passed'
-          },
-          {
-            id: 'log-2',
-            timestamp: new Date(Date.now() - 12 * 60000).toISOString(),
-            studentName: 'Unknown Candidate',
-            studentIdOrReg: 'N/A',
-            scanType: 'FACIAL',
-            status: 'MISMATCH',
-            errorMessage: 'Database signature mismatch (96% landmark variation)',
-            challengeAction: 'Tilt Check Failed'
-          },
-          {
-            id: 'log-3',
-            timestamp: new Date(Date.now() - 18 * 60000).toISOString(),
-            studentName: 'Nkemdilim Udene',
-            studentIdOrReg: '2021024005',
-            scanType: 'PASSKEY',
-            status: 'SUCCESS',
-            challengeAction: 'Passkey Signed'
-          },
-          {
-            id: 'log-4',
-            timestamp: new Date(Date.now() - 25 * 60000).toISOString(),
-            studentName: 'Amadi Benson',
-            studentIdOrReg: '2021024002',
-            scanType: 'FINGERPRINT',
-            status: 'FAILED',
-            errorMessage: 'Rate limited (60s security cooling active)',
-            challengeAction: 'Sensor Blocked'
-          },
-          {
-            id: 'log-5',
-            timestamp: new Date(Date.now() - 32 * 60000).toISOString(),
-            studentName: 'Chidi Okafor',
-            studentIdOrReg: '2021024001',
-            scanType: 'FINGERPRINT',
-            status: 'SUCCESS',
-            challengeAction: 'Biometric Match Confirmed'
-          }
-        ];
-        setAuditLogs(initialAuditLogs);
-        localStorage.setItem('coou_verification_audit_logs', JSON.stringify(initialAuditLogs));
+        setAuditLogs([]);
+        localStorage.setItem('coou_verification_audit_logs', JSON.stringify([]));
       }
     } catch (e) {
       console.warn("Storage restricted or unavailable:", e);
@@ -167,27 +123,27 @@ export default function App() {
         let fbSessions = await getSessionsFromDb();
         let fbRecords = await getRecordsFromDb();
 
-        if (fbStudents.length === 0 && fbCourses.length === 0) {
-          // Dynamic database seeding for immediate deployment readiness
+        // Purge legacy hardcoded seed demo students (std-1 through std-5) from local storage & database
+        const seedStudentIds = ['std-1', 'std-2', 'std-3', 'std-4', 'std-5'];
+        const hasLegacySeeds = fbStudents.some(s => seedStudentIds.includes(s.id));
+        if (hasLegacySeeds) {
+          fbStudents = fbStudents.filter(s => !seedStudentIds.includes(s.id));
+          localStorage.setItem('coou_students', JSON.stringify(fbStudents));
+        }
+
+        if (fbCourses.length === 0) {
+          // Dynamic database seeding for course catalog
           const seedData = generateSeedSessionsAndRecords();
           
-          for (const s of SEED_STUDENTS) {
-            await saveStudentToDb(s);
-          }
           for (const c of SEED_COURSES) {
             await saveCourseToDb(c);
           }
           for (const s of seedData.sessions) {
             await saveSessionToDb(s);
           }
-          for (const r of seedData.records) {
-            await saveRecordToDb(r);
-          }
 
-          fbStudents = SEED_STUDENTS;
           fbCourses = SEED_COURSES;
           fbSessions = seedData.sessions;
-          fbRecords = seedData.records;
         }
 
         setStudents(fbStudents);

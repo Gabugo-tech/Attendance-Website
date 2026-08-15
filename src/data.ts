@@ -165,79 +165,8 @@ export const SEED_COURSES: Course[] = [
   }
 ];
 
-// Pre-populated Students at COOU
-export const SEED_STUDENTS: Student[] = [
-  {
-    id: "std-1",
-    name: "Anyigor Chinedu Samuel",
-    regNo: "2021034012",
-    department: "Computer Science",
-    photoUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=250&h=250&fit=crop",
-    registeredBiometrics: {
-      face: true,
-      fingerprint: true,
-      devicePasskey: true
-    },
-    faceFingerprintHash: "hash_coou_921405",
-    faceEncodings: [Array.from({ length: 128 }, () => Math.random() - 0.5)]
-  },
-  {
-    id: "std-2",
-    name: "Okafor Grace Chinonye",
-    regNo: "2021034045",
-    department: "Computer Science",
-    photoUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=250&h=250&fit=crop",
-    registeredBiometrics: {
-      face: true,
-      fingerprint: true,
-      devicePasskey: true
-    },
-    faceFingerprintHash: "hash_coou_538202",
-    faceEncodings: [Array.from({ length: 128 }, () => Math.random() - 0.5)]
-  },
-  {
-    id: "std-3",
-    name: "Okonkwo Chukwuka David",
-    regNo: "2021054088",
-    department: "Physics",
-    photoUrl: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=250&h=250&fit=crop",
-    registeredBiometrics: {
-      face: true,
-      fingerprint: true,
-      devicePasskey: true
-    },
-    faceFingerprintHash: "hash_coou_194723",
-    faceEncodings: [Array.from({ length: 128 }, () => Math.random() - 0.5)]
-  },
-  {
-    id: "std-4",
-    name: "Ezeh Blessing Chioma",
-    regNo: "2021084112",
-    department: "Geology",
-    photoUrl: "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=250&h=250&fit=crop",
-    registeredBiometrics: {
-      face: true,
-      fingerprint: true,
-      devicePasskey: true
-    },
-    faceFingerprintHash: "hash_coou_410294",
-    faceEncodings: [Array.from({ length: 128 }, () => Math.random() - 0.5)]
-  },
-  {
-    id: "std-5",
-    name: "Nnaji Ikechukwu Justin",
-    regNo: "2021034199",
-    department: "Computer Science",
-    photoUrl: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=250&h=250&fit=crop",
-    registeredBiometrics: {
-      face: true,
-      fingerprint: true,
-      devicePasskey: true
-    },
-    faceFingerprintHash: "hash_coou_859203",
-    faceEncodings: [Array.from({ length: 128 }, () => Math.random() - 0.5)]
-  }
-];
+// Pre-populated Students at COOU (Empty roster by default - students register via biometric registration portal)
+export const SEED_STUDENTS: Student[] = [];
 
 // Helper to generate seed sessions and simulation attendance logs from the last 7 days
 export function generateSeedSessionsAndRecords(): { sessions: AttendanceSession[], records: AttendanceRecord[] } {
