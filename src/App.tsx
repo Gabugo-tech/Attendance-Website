@@ -132,13 +132,6 @@ export default function App() {
           localStorage.setItem('coou_students', JSON.stringify(fbStudents));
         }
 
-        // Purge all legacy and registered courses as requested
-        if (fbCourses.length > 0) {
-          await deleteAllCoursesFromDb();
-          fbCourses = [];
-        }
-        localStorage.setItem('coou_courses', JSON.stringify([]));
-
         setStudents(fbStudents);
         setCourses(fbCourses);
         setSessions(fbSessions);

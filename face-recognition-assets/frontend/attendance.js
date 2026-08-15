@@ -32,6 +32,8 @@ async function bootstrapFirebase() {
 }
 
 // 2. RUN AUTHENTICATION WRAPPER
+let currentUser = null; // Keep a reference to refresh tokens on demand
+
 function setupAuthListeners() {
   const provider = new GoogleAuthProvider();
   const usernameText = document.getElementById("auth-username");
@@ -39,6 +41,7 @@ function setupAuthListeners() {
   const authIndicator = document.getElementById("auth-indicator");
 
   onAuthStateChanged(auth, async (user) => {
+    currentUser = user;
     if (user) {
       idToken = await user.getIdToken();
       usernameText.textContent = user.email;
@@ -321,6 +324,15 @@ function updateLivenessHUD() {
 
 // 8. SEND DESCRIPTOR STREAM TO SERVER CLOUD RUN API ENDPOINT
 async function handleTransmitDescriptor(descriptorArray) {
+  // Always refresh the ID token before transmitting — tokens expire after 1 hour
+  if (currentUser) {
+    try {
+      idToken = await currentUser.getIdToken(/* forceRefresh= */ false);
+    } catch (e) {
+      console.warn("[Security Hub] Token refresh failed", e);
+    }
+  }
+
   if (!idToken) {
     alert("Supervision Token expired. Re-authenticate!");
     stopAttendanceScanner();

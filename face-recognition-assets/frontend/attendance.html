@@ -166,9 +166,7 @@
   </main>
 
   <!-- Import core scripts -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"></script>
-  <script src="./attendance.js"></script>
+  <!-- attendance.js uses ES module imports for Firebase — load as a module -->
+  <script type="module" src="./attendance.js"></script>
 </body>
 </html>

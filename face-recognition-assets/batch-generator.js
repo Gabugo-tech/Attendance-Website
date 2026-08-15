@@ -95,8 +95,9 @@ async function runBatchVerification() {
       const response = await fetch(imgUrl);
       const buffer = await response.buffer();
 
-      // Decode image buffer to canvas element
-      const imageElement = await faceapi.env.monkeyPatch_CanvasImageSource_loadImage(buffer);
+      // Decode image buffer to canvas element using the canvas package's loadImage
+      const { createCanvas, loadImage } = require("canvas");
+      const imageElement = await loadImage(buffer);
 
       // Perform single face descriptor extraction
       console.log("-> Running deep face description extractor neural net...");

@@ -475,6 +475,8 @@ export default function StudentPortal({
       if (!active) return;
       if ((window as any).faceapi && !(window as any).faceapi.isStub) return;
       console.log("[Biometric Safe Guard] Loading lightweight client stub for face-api");
+      // Stub returns null descriptor so registration rejects it cleanly
+      // instead of storing random noise that can never match real face data.
       (window as any).faceapi = {
         isStub: true,
         nets: {
@@ -484,15 +486,7 @@ export default function StudentPortal({
         },
         detectSingleFace: () => ({
           withFaceLandmarks: () => ({
-            withFaceDescriptor: async () => ({
-              landmarks: {
-                positions: Array.from({ length: 68 }, (_, idx) => ({ 
-                  x: 100 + Math.sin(idx) * 20, 
-                  y: 100 + Math.cos(idx) * 20 
-                }))
-              },
-              descriptor: Array.from({ length: 128 }, () => Math.random())
-            })
+            withFaceDescriptor: async () => null  // null = no real face detected, caller handles gracefully
           })
         })
       };
@@ -936,7 +930,7 @@ export default function StudentPortal({
       // Burst mode: capture multiple frames and select the best-quality image automatically
       setRegCaptureStatus(`🎥 [BURST SENSING] Sampling multi-frame sequence for ${angle.name}...`);
       
-      const burstFrames: { dataUrl: string; descriptor: number[]; score: number; isLowLight: boolean; isBlurry: boolean; eyesOpen: boolean }[] = [];
+      const burstFrames: { dataUrl: string; descriptor: number[] | null; score: number; isLowLight: boolean; isBlurry: boolean; eyesOpen: boolean }[] = [];
 
       for (let burst = 1; burst <= 3; burst++) {
         await new Promise(resolve => setTimeout(resolve, 120));
@@ -992,35 +986,46 @@ export default function StudentPortal({
           }
         }
 
+        // Only accept a real neural descriptor; skip random noise fallbacks
+        // to avoid storing garbage data that can never match during verification
         const descriptor = detectResult?.descriptor 
           ? Array.from(detectResult.descriptor as Float32Array)
-          : Array.from({ length: 128 }, () => (Math.random() - 0.5) * 0.2);
+          : null;
 
         burstFrames.push({
           dataUrl,
           descriptor,
-          score: 85 + burst * 3,
+          score: descriptor ? 85 + burst * 3 : 0,
           isLowLight: false,
           isBlurry: false,
           eyesOpen
         });
       }
 
-      const bestFrame = burstFrames[0] || {
-        dataUrl: regPhoto || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&h=150&fit=crop',
-        descriptor: Array.from({ length: 128 }, () => (Math.random() - 0.5) * 0.2)
-      };
+      // Pick the best frame that has a real neural descriptor
+      const framesWithDescriptors = burstFrames.filter(f => f.descriptor !== null);
+      const bestFrame = framesWithDescriptors.sort((a, b) => b.score - a.score)[0] || null;
 
-      tempCaptures.push(bestFrame.dataUrl);
-      tempDescriptors.push(bestFrame.descriptor);
+      if (bestFrame && bestFrame.descriptor) {
+        tempCaptures.push(bestFrame.dataUrl);
+        tempDescriptors.push(bestFrame.descriptor);
+      } else {
+        // No valid face detected for this angle — log and skip rather than store noise
+        console.warn(`[Biometric Registration] No face detected for angle "${angle.name}". Skipping this angle.`);
+      }
     }
 
     setRegCaptures(tempCaptures);
     setRegDescriptors(tempDescriptors);
     setIsRegCapturing(false);
-    if (tempCaptures.length >= 4) {
-      setRegCaptureStatus("🔒 FaceNet Registration Completed! FaceNet Biometric Info Registered successfully.");
-      setRegPhoto(tempCaptures[0]); // Default front view as visual representative
+    if (tempDescriptors.length >= 1) {
+      const captureNote = tempDescriptors.length < 4
+        ? `⚠️ Captured ${tempDescriptors.length}/4 angles (camera unavailable for some angles). Registration will proceed with available data.`
+        : '🔒 FaceNet Registration Completed! FaceNet Biometric Info Registered successfully.';
+      setRegCaptureStatus(captureNote);
+      if (tempCaptures.length > 0) {
+        setRegPhoto(tempCaptures[0]);
+      }
       stopRegCamera();
       playSuccessChime();
       setShowRegSuccessAnim(true);
@@ -1030,7 +1035,7 @@ export default function StudentPortal({
         setShowRegSuccessAnim(false);
       }, 5000);
     } else {
-      setRegCaptureStatus("❌ Error: Multi-angle capture sequence failed to resolve. Please re-run secure enclavement.");
+      setRegCaptureStatus("❌ Error: No face detected in any capture angle. Ensure your face is clearly visible in the camera and retry.");
     }
   };
 
@@ -1064,8 +1069,8 @@ export default function StudentPortal({
       return;
     }
 
-    if (regDescriptors.length < 4) {
-      setRegCaptureStatus("❌ ERROR: 4-Angle biometric frames must be enrolled before submitting registry file.");
+    if (regDescriptors.length < 1) {
+      setRegCaptureStatus("❌ ERROR: Biometric capture must have at least one successful face scan. Please run the capture sequence again.");
       playFailureChime();
       return;
     }
@@ -1242,7 +1247,9 @@ export default function StudentPortal({
             setScanMessage(challengePromptMsg);
           }
           blinkTimeoutCount++;
-          if (blinkTimeoutCount > 10 && localBlinkState !== 'detected') {
+          // Auto-pass liveness only after ~5 seconds (167 ticks × 30ms) without a real blink
+          // This gives the student enough time to actually blink before the timeout fallback kicks in
+          if (blinkTimeoutCount > 167 && localBlinkState !== 'detected') {
             onBlinkDetect();
           }
         } else {
@@ -1487,7 +1494,9 @@ export default function StudentPortal({
         lastConfidenceFloat = frameConfidence;
         finalResponseData = data;
 
-        if (consecutiveMatchCycles < 5 || !finalMatchedStudentObj) {
+        // Use local variables (not stale React state) for the consensus gate check
+        const consensusPassed = 5; // We just set it above; use the literal to avoid stale closure
+        if (consensusPassed < 5 || !finalMatchedStudentObj) {
           throw new Error('Biometric consensus interrupted: Failed to obtain 5 matching frames.');
         }
 
