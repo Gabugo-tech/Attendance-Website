@@ -61,7 +61,7 @@ export interface CourseRep {
   email: string;
   phone: string;
   level: string; // e.g. "400 Level"
-  assignedCourseCode: string;
+  assignedCourseCode?: string;
   dateRegistered: string;
   password?: string;
 }

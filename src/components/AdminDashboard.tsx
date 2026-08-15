@@ -83,7 +83,6 @@ export default function AdminDashboard({
   const [repEmail, setRepEmail] = useState('');
   const [repPhone, setRepPhone] = useState('');
   const [repLevel, setRepLevel] = useState('400 Level');
-  const [repCourse, setRepCourse] = useState('');
   const [repPassword, setRepPassword] = useState('');
   const [deletingCourseRep, setDeletingCourseRep] = useState<CourseRep | null>(null);
 
@@ -191,12 +190,12 @@ export default function AdminDashboard({
     clearMessages();
 
     if (!lecName || !lecId || !lecEmail) {
-      setErrorMessage('Full Name, Employee ID, and Email are required.');
+      setErrorMessage('Full Name, Course Code, and Email are required.');
       return;
     }
 
     if (lecturers.some(l => l.employeeId.toLowerCase() === lecId.toLowerCase())) {
-      setErrorMessage(`Lecturer with ID ${lecId} already exists.`);
+      setErrorMessage(`Lecturer for Course Code ${lecId} is already registered.`);
       return;
     }
 
@@ -212,7 +211,7 @@ export default function AdminDashboard({
     };
 
     onRegisterLecturer(newLec);
-    setSuccessMessage(`Lecturer ${lecName} registered successfully!`);
+    setSuccessMessage(`Academic Staff ${lecName} registered for ${lecId.toUpperCase()} successfully!`);
     
     setLecName('');
     setLecId('');
@@ -225,8 +224,8 @@ export default function AdminDashboard({
     e.preventDefault();
     clearMessages();
 
-    if (!repName || !repRegNo || !repEmail || !repCourse) {
-      setErrorMessage('Please fill in all required fields, including assigning a course.');
+    if (!repName || !repRegNo || !repEmail || !repPassword) {
+      setErrorMessage('Please fill in all required fields, including setting a login password.');
       return;
     }
 
@@ -243,19 +242,17 @@ export default function AdminDashboard({
       email: repEmail,
       phone: repPhone || 'N/A',
       level: repLevel,
-      assignedCourseCode: repCourse,
       dateRegistered: new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }),
-      password: repPassword || 'rep123'
+      password: repPassword
     };
 
     onRegisterCourseRep(newRep);
-    setSuccessMessage(`Course Representative ${repName} assigned and registered!`);
+    setSuccessMessage(`Course Representative ${repName} registered successfully!`);
 
     setRepName('');
     setRepRegNo('');
     setRepEmail('');
     setRepPhone('');
-    setRepCourse('');
     setRepPassword('');
   };
 
@@ -842,15 +839,20 @@ export default function AdminDashboard({
 
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Employee ID</label>
-                        <input
-                          type="text"
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Course Code</label>
+                        <select
                           required
                           value={lecId}
                           onChange={(e) => setLecId(e.target.value)}
-                          placeholder="e.g. COOU-LEC-109"
-                          className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-800 font-mono uppercase focus:border-blue-900 focus:outline-none"
-                        />
+                          className="w-full rounded-lg border border-slate-200 bg-slate-50 py-1.5 pl-3 pr-8 text-xs text-slate-800 font-mono focus:border-blue-900 focus:outline-none"
+                        >
+                          <option value="">-- Select Course Code --</option>
+                          {courses.map((c) => (
+                            <option key={c.code} value={c.code}>
+                              {c.code} - {c.title}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                       <div>
                         <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Department</label>
@@ -978,29 +980,13 @@ export default function AdminDashboard({
                     </div>
 
                     <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Assigned Course Code</label>
-                      <select
-                        required
-                        value={repCourse}
-                        onChange={(e) => setRepCourse(e.target.value)}
-                        className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-3 pr-8 text-xs text-slate-800 focus:border-blue-900 focus:outline-none"
-                      >
-                        <option value="">-- Select Assignment Target --</option>
-                        {courses.map((c) => (
-                          <option key={c.code} value={c.code}>
-                            {c.code} - {c.title} ({c.semester || '1st Sem'})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Login Password (Default: rep123)</label>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Login Password</label>
                       <input
                         type="password"
+                        required
                         value={repPassword}
                         onChange={(e) => setRepPassword(e.target.value)}
-                        placeholder="Optional layout override passcode"
+                        placeholder="Set secure password for course rep"
                         className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-800 focus:border-blue-900 focus:outline-none"
                       />
                     </div>
@@ -1078,7 +1064,7 @@ export default function AdminDashboard({
                           <div className="min-w-0">
                             <h5 className="text-xs font-bold text-slate-950 truncate leading-tight">{lec.name}</h5>
                             <span className="inline-block bg-blue-100/60 text-blue-850 font-mono text-[9px] font-bold px-1.5 py-0.5 rounded uppercase mt-1">
-                              LEC ID: {lec.employeeId}
+                              COURSE: {lec.employeeId}
                             </span>
                             
                             <div className="flex flex-col sm:flex-row gap-x-3 gap-y-0.5 mt-2 text-[10px] text-slate-500">
@@ -1139,10 +1125,16 @@ export default function AdminDashboard({
                               <span className="bg-amber-100 text-amber-900 font-mono text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">
                                 REG: {rep.regNo}
                               </span>
-                              <span className="font-mono text-[9px] text-slate-600 flex items-center space-x-1">
-                                <BookOpen className="h-3 w-3 text-slate-400 shrink-0" />
-                                <strong className="text-blue-900 font-extrabold">{rep.assignedCourseCode}</strong>
-                              </span>
+                              {rep.assignedCourseCode ? (
+                                <span className="font-mono text-[9px] text-slate-600 flex items-center space-x-1">
+                                  <BookOpen className="h-3 w-3 text-slate-400 shrink-0" />
+                                  <strong className="text-blue-900 font-extrabold">{rep.assignedCourseCode}</strong>
+                                </span>
+                              ) : (
+                                <span className="font-mono text-[9px] text-slate-500 flex items-center space-x-1">
+                                  <span>General / All Courses</span>
+                                </span>
+                              )}
                             </div>
 
                             <div className="flex flex-col sm:flex-row gap-x-3 gap-y-0.5 mt-2 text-[10px] text-slate-500">
@@ -1567,7 +1559,7 @@ export default function AdminDashboard({
               </div>
 
               <p className="text-xs text-slate-600 leading-relaxed">
-                Are you absolutely sure you want to completely revoke credentials and delete the profile for lecturer <strong className="text-slate-950">{deletingLecturer.name}</strong> (LEC ID: {deletingLecturer.employeeId})?
+                Are you absolutely sure you want to completely revoke credentials and delete the profile for lecturer <strong className="text-slate-950">{deletingLecturer.name}</strong> (Course Code: {deletingLecturer.employeeId})?
               </p>
 
               <div className="flex space-x-3 pt-2">
@@ -1626,7 +1618,7 @@ export default function AdminDashboard({
               </div>
 
               <p className="text-xs text-slate-600 leading-relaxed">
-                Are you absolutely sure you want to revoke authorized student-administrator role for <strong className="text-slate-950">{deletingCourseRep.name}</strong> (REG: {deletingCourseRep.regNo}) for assigned course <strong className="text-blue-900">{deletingCourseRep.assignedCourseCode}</strong>?
+                Are you absolutely sure you want to revoke authorized student-administrator role for <strong className="text-slate-950">{deletingCourseRep.name}</strong> (REG: {deletingCourseRep.regNo}){deletingCourseRep.assignedCourseCode ? <> for assigned course <strong className="text-blue-900">{deletingCourseRep.assignedCourseCode}</strong></> : ''}?
               </p>
 
               <div className="flex space-x-3 pt-2">

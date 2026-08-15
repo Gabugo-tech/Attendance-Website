@@ -105,8 +105,8 @@ export default function AuthGate({ lecturers, courseReps, onAuthenticate }: Auth
     );
 
     if (matchedRep) {
-      const pinRequired = matchedRep.password || 'rep123';
-      if (password === pinRequired) {
+      const pinRequired = matchedRep.password;
+      if (pinRequired && password === pinRequired) {
         setFailedAttempts(0);
         onAuthenticate({
           role: 'student', // student represents Course Rep Mode internally
