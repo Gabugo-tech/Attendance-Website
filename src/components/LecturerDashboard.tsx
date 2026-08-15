@@ -62,6 +62,7 @@ export default function LecturerDashboard({
   const [sentAlerts, setSentAlerts] = useState<string[]>([]);
   const [isSendingAlerts, setIsSendingAlerts] = useState<boolean>(false);
   const [alertSuccessMessage, setAlertSuccessMessage] = useState<string | null>(null);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
 
   useEffect(() => {
     if (currentActiveSession) {
@@ -131,7 +132,8 @@ export default function LecturerDashboard({
   const handleToggleAttendance = async (student: Student, currentStatus: 'PRESENT' | 'ABSENT', existingRecordId?: string) => {
     const activeSession = activeSessions.find(s => s.id === displaySessionId) || activeSessions[0];
     if (!activeSession) {
-      alert("No active session found. Please initialize an Attendance Gate first.");
+      setDashboardError("No active session found. Please initialize an Attendance Gate first.");
+      setTimeout(() => setDashboardError(null), 4000);
       return;
     }
 
@@ -171,7 +173,8 @@ export default function LecturerDashboard({
         try {
           await onMarkAttendance(newRecord);
         } catch (e: any) {
-          alert(e.message || "Failed to mark attendance.");
+          setDashboardError(e.message || "Failed to mark attendance.");
+          setTimeout(() => setDashboardError(null), 5000);
         }
       }
     }
@@ -332,6 +335,25 @@ export default function LecturerDashboard({
 
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-6 space-y-6" id="lecturer-mode-stage">
+      {dashboardError && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0 }}
+          className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-medium flex items-center justify-between shadow-sm"
+        >
+          <div className="flex items-center space-x-2">
+            <span className="font-bold">⚠️ Notice:</span>
+            <span>{dashboardError}</span>
+          </div>
+          <button
+            onClick={() => setDashboardError(null)}
+            className="text-rose-600 hover:text-rose-900 text-xs font-bold px-2 py-0.5 cursor-pointer"
+          >
+            ✕
+          </button>
+        </motion.div>
+      )}
       
       {/* 2-COLUMN TOP RAIL: Launch session on Left, Live Security Stream / QR Token on Right */}
       <div className="grid gap-6 md:grid-cols-12">

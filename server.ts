@@ -35,6 +35,46 @@ function getGeminiClient(): GoogleGenAI {
 const biometricProfileCache = new Map<string, { data: string; mimeType: string }>();
 const activeFetches = new Map<string, Promise<{ data: string; mimeType: string } | null>>();
 
+// --- SSRF DEFENSIVE VALIDATION ---
+function isSafePublicUrl(rawUrl: string): boolean {
+  try {
+    if (!rawUrl || typeof rawUrl !== 'string') return false;
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return false;
+    }
+    const hostname = parsed.hostname.toLowerCase();
+    
+    // Block loopback, localhost, 0.0.0.0, broadcast
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '0.0.0.0') {
+      return false;
+    }
+    // Block cloud metadata & link-local addresses (AWS/GCP/Azure IMDS 169.254.169.254, IPv6 fe80)
+    if (hostname.startsWith('169.254.') || hostname.startsWith('fe80:') || hostname === 'metadata.google.internal') {
+      return false;
+    }
+    // Block private IPv4 ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8)
+    if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) return false;
+    if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname)) return false;
+    if (/^172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname)) return false;
+    if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) return false;
+
+    // Block non-standard / dangerous ports
+    if (parsed.port && parsed.port !== '80' && parsed.port !== '443') {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Input sanitizer to prevent prompt injection and control character abuse
+function sanitizeFieldValue(val: any, maxLen: number = 80): string {
+  if (typeof val !== 'string') return '';
+  return val.replace(/[\r\n\t"']/g, ' ').replace(/\s+/g, ' ').slice(0, maxLen).trim();
+}
+
 async function fetchWithTimeout(url: string, timeoutMs: number = 2500): Promise<Response> {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -80,6 +120,13 @@ async function fetchImageAsPart(url: string): Promise<any> {
     let activeUrl = url;
     if (url.includes("15000009") || url.includes("1500000") || url.includes("1500000927760")) {
       activeUrl = "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&h=150&fit=crop";
+    }
+
+    // Strict SSRF check before requesting external URLs
+    if (!isSafePublicUrl(activeUrl)) {
+      console.warn(`[Security Alert: SSRF Blocked] Refused to fetch unsafe URL: ${activeUrl}`);
+      const fallbackCached = { data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mMsrQcAAdIBAMbZ9W4AAAAASUVORK5CYII=", mimeType: "image/png" };
+      return { inlineData: fallbackCached };
     }
 
     // 2. Coalesce duplicate fetches in-flight to prevent network contention
@@ -138,18 +185,54 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Security Headers Middleware
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.removeHeader('X-Powered-By');
+    next();
+  });
+
+  // Rate Limiting Store for Verification API
+  const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+  const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
+  const MAX_REQUESTS_PER_MINUTE = 40;
+
   // Middleware for parsing large JSON payloads (specifically Base64 images)
   app.use(express.json({ limit: '15mb' }));
 
   // API Route: Secure Facial Recognition Matching
   app.post("/api/facial-recognition-match", async (req, res) => {
+    // Check Rate Limits
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const clientRecord = rateLimitMap.get(clientIp);
+
+    if (!clientRecord || now > clientRecord.resetTime) {
+      rateLimitMap.set(clientIp, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
+    } else {
+      if (clientRecord.count >= MAX_REQUESTS_PER_MINUTE) {
+        return res.status(429).json({
+          match: false,
+          studentId: null,
+          confidence: 0,
+          message: "Rate limit exceeded. Too many recognition requests. Please retry in 1 minute."
+        });
+      }
+      clientRecord.count++;
+    }
+
     try {
       const { webcamImage, students, posingStudentId, session, records, deviceId } = req.body;
-      if (!webcamImage) {
+      if (!webcamImage || typeof webcamImage !== 'string') {
         return res.status(400).json({ error: "Webcam snapshot image is required" });
       }
       if (!students || !Array.isArray(students) || students.length === 0) {
         return res.status(400).json({ error: "No student roster database profiles found for matching comparison." });
+      }
+      if (students.length > 80) {
+        return res.status(400).json({ error: "Candidate student roster exceeds maximum batch limit (80)." });
       }
 
       // Check for custom local file simulation if API Key is mock or missing
@@ -257,27 +340,32 @@ async function startServer() {
           webcamBase64 = parts[1];
         }
       } else if (webcamImage.startsWith('http://') || webcamImage.startsWith('https://')) {
-        console.log(`[Biometric Pipeline] Webcam image passed as public URL (${webcamImage}). Fetching and converting to base64...`);
-        try {
-          const res = await fetch(webcamImage);
-          if (res.ok) {
-            const arrayBuffer = await res.arrayBuffer();
-            webcamBase64 = Buffer.from(arrayBuffer).toString('base64');
-            webcamMime = res.headers.get('content-type') || 'image/jpeg';
-          } else {
-            const fallbackPortrait = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop";
-            const fres = await fetch(fallbackPortrait);
-            if (fres.ok) {
-              const arrayBuffer = await fres.arrayBuffer();
-              webcamBase64 = Buffer.from(arrayBuffer).toString('base64');
-              webcamMime = 'image/jpeg';
-            } else {
-              webcamBase64 = '';
-            }
-          }
-        } catch (err) {
-          console.error("Failed to fetch public URL webcam image:", err);
+        if (!isSafePublicUrl(webcamImage)) {
+          console.warn(`[Security Alert: SSRF Blocked] Unsafe webcamImage URL rejected: ${webcamImage}`);
           webcamBase64 = '';
+        } else {
+          console.log(`[Biometric Pipeline] Webcam image passed as public URL. Fetching and converting to base64...`);
+          try {
+            const res = await fetchWithTimeout(webcamImage, 2500);
+            if (res.ok) {
+              const arrayBuffer = await res.arrayBuffer();
+              webcamBase64 = Buffer.from(arrayBuffer).toString('base64');
+              webcamMime = res.headers.get('content-type') || 'image/jpeg';
+            } else {
+              const fallbackPortrait = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop";
+              const fres = await fetchWithTimeout(fallbackPortrait, 2500);
+              if (fres.ok) {
+                const arrayBuffer = await fres.arrayBuffer();
+                webcamBase64 = Buffer.from(arrayBuffer).toString('base64');
+                webcamMime = 'image/jpeg';
+              } else {
+                webcamBase64 = '';
+              }
+            }
+          } catch (err) {
+            console.error("Failed to fetch public URL webcam image:", err);
+            webcamBase64 = '';
+          }
         }
       }
 
@@ -310,10 +398,13 @@ async function startServer() {
       let candidatesText = "\n";
       for (const resItem of photoResults) {
         const { student, index, photoPart } = resItem;
-        candidatesText += `Candidate ${index + 1}: Name="${student.name}", RegNo="${student.regNo}", ID="${student.id}"\n`;
+        const safeName = sanitizeFieldValue(student.name, 60);
+        const safeRegNo = sanitizeFieldValue(student.regNo, 30);
+        const safeId = sanitizeFieldValue(student.id, 40);
+        candidatesText += `Candidate ${index + 1}: Name="${safeName}", RegNo="${safeRegNo}", ID="${safeId}"\n`;
         
         if (photoPart) {
-          contents.push({ text: `Below is Candidate ${index + 1} (${student.name}, ID: ${student.id}) registered photo:` });
+          contents.push({ text: `Below is Candidate ${index + 1} (${safeName}, ID: ${safeId}) registered photo:` });
           contents.push(photoPart);
         }
       }

@@ -657,46 +657,13 @@ export default function App() {
           </AnimatePresence>
         </section>
 
-        {/* HELPFUL WALKTROUGH/GUIDELINE BLOCK */}
-        <section className="mx-auto max-w-7xl px-4 md:px-6 lg:px-8 mt-6">
-          <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-4 shadow-sm">
-            <h3 className="text-xs font-bold uppercase tracking-widest text-blue-900 flex items-center space-x-2">
-              <HelpCircle className="h-4.5 w-4.5" />
-              <span>Biometric Simulation Sandbox Testing Instructions</span>
-            </h3>
-            
-            <div className="grid gap-4 md:grid-cols-3 text-xs leading-relaxed text-slate-500">
-              <div className="space-y-1">
-                <span className="font-bold text-slate-800 block">Step 1: Open Lecturer Portal</span>
-                <p>
-                  Click <strong>Lecturer Mode</strong> in the top-right. Choose a course (e.g. <em>CSC 411 - Compiler Design</em>) with coordinates set strictly on <em>Uli Campus</em>, and launch the portal. This displays a rotating secure 6-digit OTP passcode and live screen QR terminal.
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                <span className="font-bold text-slate-800 block">Step 2: Enroll student & capture face</span>
-                <p>
-                  Switch back to <strong>Course Rep Mode</strong>. Click <strong>"Register Profile"</strong> in the top-right to register a real student with an instant photo. Choose the active course session, then trigger the secure <strong>Biometric Facial Auto-Scan</strong> to check in.
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                <span className="font-bold text-slate-800 block">Step 3: Monitor Live Lecturer Reports</span>
-                <p>
-                  Flip back to <strong>Lecturer Mode</strong>. Watch verified check-ins populating the real-time grid immediately with exact verified biometric tag profiles, and click <strong>"Export COOU Spreadsheet"</strong>.
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
-
       </main>
 
       {/* Elegant Standard humble footer */}
       <footer className="border-t border-slate-200 bg-slate-100 py-6 text-center text-xs text-slate-500 font-mono">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-1">
           <p>© 2026 Chukwuemeka Odumegwu Ojukwu University. All Rights Reserved.</p>
-          <p className="text-[10px] text-slate-400 uppercase font-semibold">Smart Attendance Verification Assurance Terminal // Secure Sandbox Enclave Mode v4.92</p>
+          <p className="text-[10px] text-slate-400 uppercase font-semibold">Smart Attendance Verification Assurance Terminal // System v4.92</p>
         </div>
       </footer>
 

@@ -17,10 +17,25 @@ export default function AuthGate({ lecturers, courseReps, onAuthenticate }: Auth
   const [credentialInput, setCredentialInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [deniedMessage, setDeniedMessage] = useState<string | null>(null);
+  const [failedAttempts, setFailedAttempts] = useState<number>(0);
+  const [lockoutRemaining, setLockoutRemaining] = useState<number>(0);
+
+  React.useEffect(() => {
+    if (lockoutRemaining <= 0) return;
+    const timer = setInterval(() => {
+      setLockoutRemaining(prev => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [lockoutRemaining]);
 
   const handleVerify = (e: React.FormEvent) => {
     e.preventDefault();
     setDeniedMessage(null);
+
+    if (lockoutRemaining > 0) {
+      setDeniedMessage(`Too many failed attempts. Terminal is locked for security. Try again in ${lockoutRemaining}s.`);
+      return;
+    }
 
     const input = credentialInput.trim().toLowerCase();
     const password = passwordInput.trim();
@@ -35,9 +50,22 @@ export default function AuthGate({ lecturers, courseReps, onAuthenticate }: Auth
       return;
     }
 
+    const handleAuthFailure = (msg: string) => {
+      const nextFailCount = failedAttempts + 1;
+      setFailedAttempts(nextFailCount);
+      setPasswordInput('');
+      if (nextFailCount >= 5) {
+        setLockoutRemaining(30);
+        setDeniedMessage(`Security Alert: 5 consecutive failed attempts. Terminal locked for 30 seconds to prevent unauthorized access.`);
+      } else {
+        setDeniedMessage(`${msg} (Attempt ${nextFailCount} of 5 before lockout)`);
+      }
+    };
+
     // 1. Check Super Admin
     if (input === 'thatwon95@gmail.com') {
       if (password === '901010') {
+        setFailedAttempts(0);
         onAuthenticate({
           role: 'admin',
           name: 'Prof. thatwon95 (Admin)',
@@ -45,7 +73,7 @@ export default function AuthGate({ lecturers, courseReps, onAuthenticate }: Auth
         });
         return;
       } else {
-        setDeniedMessage('Invalid security key. Super Admin authentication rejected.');
+        handleAuthFailure('Invalid security key. Super Admin authentication rejected.');
         return;
       }
     }
@@ -58,6 +86,7 @@ export default function AuthGate({ lecturers, courseReps, onAuthenticate }: Auth
     if (matchedLecturer) {
       const pinRequired = matchedLecturer.password || 'lecturer123';
       if (password === pinRequired) {
+        setFailedAttempts(0);
         onAuthenticate({
           role: 'lecturer',
           name: matchedLecturer.name,
@@ -65,7 +94,7 @@ export default function AuthGate({ lecturers, courseReps, onAuthenticate }: Auth
         });
         return;
       } else {
-        setDeniedMessage('Invalid password signature. Lecturer access denied.');
+        handleAuthFailure('Invalid password signature. Lecturer access denied.');
         return;
       }
     }
@@ -78,6 +107,7 @@ export default function AuthGate({ lecturers, courseReps, onAuthenticate }: Auth
     if (matchedRep) {
       const pinRequired = matchedRep.password || 'rep123';
       if (password === pinRequired) {
+        setFailedAttempts(0);
         onAuthenticate({
           role: 'student', // student represents Course Rep Mode internally
           name: matchedRep.name,
@@ -85,13 +115,13 @@ export default function AuthGate({ lecturers, courseReps, onAuthenticate }: Auth
         });
         return;
       } else {
-        setDeniedMessage('Invalid password signature. Course Representative access denied.');
+        handleAuthFailure('Invalid password signature. Course Representative access denied.');
         return;
       }
     }
 
     // 4. Access Denied
-    setDeniedMessage('Verifiable credentials not found in the university database. Access is strictly blocked for unidentified personnel.');
+    handleAuthFailure('Verifiable credentials not found in the university database.');
   };
 
   return (
